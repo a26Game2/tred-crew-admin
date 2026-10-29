@@ -1,0 +1,44 @@
+{
+  "name": "tred-crew-admin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "sync:swagger": "node scripts/sync-openapi.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "predev": "node scripts/stop-previous-vite.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a26Game2/tred-crew-admin.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/a26Game2/tred-crew-admin/issues"
+  },
+  "homepage": "https://github.com/a26Game2/tred-crew-admin#readme",
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.6.7",
+    "dayjs": "^1.11.23",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}
