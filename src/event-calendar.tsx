@@ -18,6 +18,7 @@ function warning(e: EventRow) {
 
 export function EventCalendar({ revision }: { revision: number }) {
   const [month, setMonth] = useState(dayjs());
+  const [mode, setMode] = useState<'month' | 'year'>('month');
   const [events, setEvents] = useState<EventRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,24 +28,29 @@ export function EventCalendar({ revision }: { revision: number }) {
     async function load() {
       setLoading(true); setError('');
       try {
-        const end = month.endOf('month').toISOString();
+        const rangeStart = mode === 'year' ? month.startOf('year') : month.startOf('month');
+        const rangeEnd = mode === 'year' ? month.endOf('year') : month.endOf('month');
         const rows: EventRow[] = [];
         let page = 1;
         let totalPages = 1;
         do {
-          const res = await request<EventRow[]>(`/events${query({ page, pageSize: 100, startTo: end })}`);
+          const res = await request<EventRow[]>(`/events${query({ page, pageSize: 100, startFrom: rangeStart.toISOString(), startTo: rangeEnd.toISOString() })}`);
           rows.push(...res.data); totalPages = res.meta?.totalPages ?? 1; page++;
         } while (page <= totalPages);
-        if (active) setEvents(rows.filter(e => dayjs(e.endAt).isAfter(month.startOf('month'))));
+        if (active) setEvents(rows.filter(e => dayjs(e.endAt).isAfter(rangeStart) && dayjs(e.startAt).isBefore(rangeEnd)));
       } catch (e) { if (active) { setEvents([]); setError(e instanceof Error ? e.message : 'Không tải được lịch'); } }
       finally { if (active) setLoading(false); }
     }
     void load(); return () => { active = false; };
-  }, [month.format('YYYY-MM'), revision]);
+  }, [month.format(mode === 'year' ? 'YYYY' : 'YYYY-MM'), mode, revision]);
   return <section className="panel event-calendar" style={{ marginBottom: 24 }}>
     <div className="panel-head"><div><h2>Lịch sự kiện</h2><p>Vàng: chưa có giờ · Cam: chưa có người · Đỏ: gần đến ngày, chưa có người xác nhận</p></div>{loading && <Spin size="small"/>}</div>
     {error && <div className="error-notice">{error}</div>}
-    <Calendar value={month} onPanelChange={v => setMonth(v)} onSelect={v => { if (!v.isSame(month, 'month')) setMonth(v); }} cellRender={(day, info) => info.type === 'date' ? <div className="month-events">{events.filter(e => dayjs(e.startAt).isBefore(day.endOf('day')) && dayjs(e.endAt).isAfter(day.startOf('day'))).map(e => <button type="button" title={`${e.name} — ${warning(e).label}`} className={`month-event ${warning(e).color}`} key={e.id} onClick={ev => { ev.stopPropagation(); setSelected(e); }}>{e.name}</button>)}</div> : info.originNode}/>
+    <Calendar value={month} mode={mode} onPanelChange={(value, nextMode) => { setMonth(value); setMode(nextMode); }} onSelect={value => { if (!value.isSame(month, mode === 'year' ? 'year' : 'month')) setMonth(value); }} cellRender={(day, info) => {
+      if (info.type === 'month') { const count = events.filter(event => dayjs(event.startAt).isBefore(day.endOf('month')) && dayjs(event.endAt).isAfter(day.startOf('month'))).length; return <div className="year-event-count">{count ? <><strong>{count}</strong><span>sự kiện</span></> : <span>0 sự kiện</span>}</div>; }
+      if (info.type !== 'date') return info.originNode;
+      return <div className="month-events">{events.filter(event => dayjs(event.startAt).isBefore(day.endOf('day')) && dayjs(event.endAt).isAfter(day.startOf('day'))).map(event => <button type="button" title={`${event.name} — ${warning(event).label}`} className={`month-event ${warning(event).color} ${dayjs(event.endAt).isBefore(dayjs(), 'day') ? 'event-past' : ''}`} key={event.id} onClick={ev => { ev.stopPropagation(); setSelected(event); }}>{event.name}</button>)}</div>;
+    }}/>
     <Modal title={selected?.name} open={!!selected} onCancel={() => setSelected(undefined)} footer={null}>{selected && <p>{selected.timeConfirmed ? `${dayjs(selected.startAt).format('DD/MM/YYYY HH:mm')} — ${dayjs(selected.endAt).format('DD/MM/YYYY HH:mm')}` : `${dayjs(selected.startAt).format('DD/MM/YYYY')} · Chưa xác định giờ`}</p>}</Modal>
   </section>;
 }

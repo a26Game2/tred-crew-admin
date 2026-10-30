@@ -25,12 +25,14 @@
   "homepage": "https://github.com/a26Game2/tred-crew-admin#readme",
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
+    "@types/three": "^0.186.0",
     "antd": "^6.6.7",
     "dayjs": "^1.11.23",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

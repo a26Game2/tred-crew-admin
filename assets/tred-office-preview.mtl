@@ -1,0 +1,8 @@
+newmtl Concrete
+Kd 0.78 0.78 0.75
+newmtl TredNavy
+Kd 0.04 0.18 0.31
+newmtl TredOrange
+Kd 0.95 0.25 0.03
+newmtl Wood
+Kd 0.72 0.46 0.22

@@ -32,6 +32,8 @@ npm run preview
 
 Khi build, `VITE_API_BASE_URL` được đưa vào ứng dụng và trình duyệt gọi trực tiếp URL này; thêm origin của admin vào `CORS_ORIGINS` của backend. Vite proxy API trong chế độ dev. Cổng dev và preview đều lấy từ `VITE_HOST_PORT`. Không đưa secret vào biến `VITE_*` vì trình duyệt có thể đọc chúng. Dùng HTTPS khi truy cập ngoài máy local.
 
+Khi triển khai trên Vercel, cấu hình `vercel.json` chuyển mọi URL của admin về `index.html`. Nhờ vậy truy cập trực tiếp các URL như `/employees` vẫn tải được React Router; nếu chưa đăng nhập, ứng dụng sẽ tự chuyển sang `/login` thay vì Vercel trả trang 404.
+
 Đặc tả cho API Explorer là bản snapshot trong `src/openapi.json`. Sau khi backend thay đổi Swagger, chạy `npm run sync:swagger` (cần thư mục backend ở `../tred-crew-api` với dependencies đã cài; đặt `TRED_API_DIR` nếu đặt nơi khác), sau đó build lại.
 
 ## Tạo sự kiện từ ảnh

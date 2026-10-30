@@ -18,12 +18,15 @@ import {
   Spin,
   Table,
   Tag,
+  Tabs,
   Tooltip,
 } from "antd";
 import {
   ArrowRightOutlined,
   CalendarOutlined,
+  CameraOutlined,
   CheckCircleOutlined,
+  CheckSquareOutlined,
   ClockCircleOutlined,
   CloudSyncOutlined,
   DeleteOutlined,
@@ -37,11 +40,14 @@ import {
   UserOutlined,
   FileTextOutlined,
   SafetyCertificateOutlined,
+  UploadOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import { getSession, logout, query, request } from "./api";
 import { EventCalendar } from "./event-calendar";
+import { OfficeThreeScene, type OfficeMember, type OfficeRoom } from "./office-three";
 
 type Row = Record<string, any>;
 const date = (v?: string) => (v ? dayjs(v).format("DD/MM/YYYY HH:mm") : "—");
@@ -105,6 +111,27 @@ function useData<T>(path: string, fallback: T) {
     void load();
   }, [load]);
   return { data, loading, error, meta, load };
+}
+
+type OfficeEmployee = { id: string; displayName: string; avatarUrl?: string | null; employeeType: { name: string }; attendance?: { checkInAt: string; checkOutAt?: string | null } | null };
+type OfficeDepartment = { id: string; name: string; description?: string | null; employees: OfficeEmployee[] };
+type OfficeOverview = { today: string; departments: OfficeDepartment[] };
+const initials = (name: string) => name.trim().split(/\s+/).slice(-2).map((part) => part[0]).join('').toUpperCase();
+
+export function OfficePage() {
+  const office = useData<OfficeOverview>('/employees/office/overview', { today: '', departments: [] });
+  const [selected, setSelected] = useState<{ member: OfficeMember; department: OfficeRoom }>();
+  const activeCount = office.data.departments.reduce((total, department) => total + department.employees.filter((employee) => employee.attendance && !employee.attendance.checkOutAt).length, 0);
+  const uniqueCount = new Set(office.data.departments.flatMap((department) => department.employees.map((employee) => employee.id))).size;
+  const selectMember = useCallback((member: OfficeMember, department: OfficeRoom) => setSelected({ member, department }), []);
+  return <>
+    <Heading eyebrow="KHÔNG GIAN LÀM VIỆC" title="Văn phòng TRED" subtitle="Theo dõi vị trí phòng ban và trạng thái làm việc hôm nay." extra={<Button icon={<ReloadOutlined/>} onClick={() => void office.load()} loading={office.loading}>Làm mới</Button>}/>
+    {office.error ? <Card className="office-error">Không thể tải văn phòng: {office.error}</Card> : <Card className="office-card" bordered={false}>
+      <div className="office-topline"><div><span className="office-logo">T</span><div><strong>TRED OFFICE</strong><small>Không gian làm việc hôm nay</small></div></div><div className="office-summary"><span><b>{activeCount}</b> đang làm việc</span><span><b>{uniqueCount}</b> nhân sự</span></div></div>
+      <div className="office-three-wrap"><OfficeThreeScene departments={office.data.departments} onSelect={selectMember}/>{selected && <aside className="office-member-card"><button aria-label="Đóng" onClick={() => setSelected(undefined)}>×</button><span className="office-member-avatar">{initials(selected.member.displayName)}</span><strong>{selected.member.displayName}</strong><small>{selected.member.employeeType.name} · {selected.department.name}</small><em className={selected.member.attendance && !selected.member.attendance.checkOutAt ? 'online' : ''}>{selected.member.attendance && !selected.member.attendance.checkOutAt ? 'Đang làm việc' : 'Chưa check-in'}</em></aside>}{!office.loading && !office.data.departments.length && <div className="office-empty-overlay"><Empty description="Chưa có phòng ban hoạt động để hiển thị"/></div>}<div className="office-three-hint">Kéo để xoay văn phòng · Cuộn để zoom · Bấm nhân sự để xem trạng thái</div></div>
+      <div className="office-legend"><span><i className="legend-working"/> Đang làm việc</span><span><i className="legend-away"/> Chưa check-in</span><span><i className="legend-empty"/> Ghế trống</span><em>Mô hình Three.js · bố cục dựa trên ảnh văn phòng bạn cung cấp.</em></div>
+    </Card>}
+  </>;
 }
 function Heading({
   eyebrow = "TỔNG QUAN",
@@ -686,27 +713,30 @@ export function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
+  const [departmentOpen, setDepartmentOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [form] = Form.useForm();
   const [typeForm] = Form.useForm();
+  const [departmentForm] = Form.useForm();
   const data = useData<Row[]>(
     `/employees${query({ page, pageSize: 20, search })}`,
     [],
   );
   const types = useData<Row[]>("/employee-types", []);
+  const departments = useData<Row[]>("/departments", []);
   const users = useData<Row[]>("/users?pageSize=100&status=ACTIVE", []);
   const act = useAction();
   const show = (r?: Row) => {
     setEditing(r || null);
     form.resetFields();
-    if (r) form.setFieldsValue(r);
+    if (r) form.setFieldsValue({ ...r, phone: r.user?.phone, departmentIds: r.departments?.map((item: Row) => item.department.id) });
     setOpen(true);
   };
   const columns = [
     {
       title: "NHÂN SỰ",
       render: (_: any, r: Row) => (
-        <Person name={r.displayName} sub={r.employeeCode} />
+        <Person name={r.displayName} sub={r.user?.email} />
       ),
     },
     {
@@ -715,9 +745,9 @@ export function EmployeesPage() {
     },
     {
       title: "SỐ ĐIỆN THOẠI",
-      dataIndex: "phone",
-      render: (v: string) => v || "—",
+      render: (_: any, r: Row) => r.user?.phone || "—",
     },
+    { title: "PHÒNG BAN", render: (_: any, r: Row) => r.departments?.map((item: Row) => item.department.name).join(", ") || "—" },
     { title: "EXP", dataIndex: "totalExp", render: (v: number) => v ?? 0 },
     { title: "TRẠNG THÁI", dataIndex: "status", render: status },
     {
@@ -760,6 +790,7 @@ export function EmployeesPage() {
         extra={
           <Space>
             <Button onClick={() => setTypeOpen(true)}>Loại nhân sự</Button>
+            <Button onClick={() => setDepartmentOpen(true)}>Phòng ban</Button>
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -808,10 +839,11 @@ export function EmployeesPage() {
           onFinish={async (v) => {
             if (
               await act(async () => {
-                await request(
-                  editing ? `/employees/${editing.id}` : "/employees",
-                  { method: editing ? "PATCH" : "POST", body: v },
-                );
+                if (editing) {
+                  const { phone, citizenId, bankName, bankAccountNumber, ...employment } = v;
+                  await request(`/employees/${editing.id}`, { method: "PATCH", body: employment });
+                  await request(`/employees/${editing.id}/personal-info`, { method: "PATCH", body: { phone, citizenId, bankName, bankAccountNumber } });
+                } else await request("/employees", { method: "POST", body: v });
                 await data.load();
               })
             )
@@ -835,37 +867,12 @@ export function EmployeesPage() {
                   }))}
                 />
               </Form.Item>
-              <Form.Item
-                label="Mã nhân sự"
-                name="employeeCode"
-                rules={[{ required: true, min: 2 }]}
-              >
-                <Input />
-              </Form.Item>
             </>
           )}
-          <Form.Item
-            label="Tên hiển thị"
-            name="displayName"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="Loại nhân sự"
-            name="employeeTypeId"
-            rules={[{ required: true }]}
-          >
-            <Select
-              placeholder="Chọn loại nhân sự"
-              options={types.data
-                .filter((t) => t.isActive)
-                .map((t) => ({ value: t.id, label: t.name }))}
-            />
-          </Form.Item>
-          <Form.Item label="Số điện thoại" name="phone">
-            <Input />
-          </Form.Item>
+          <Tabs items={[
+            { key: "employment", label: "Chức vụ & phòng ban", children: <><Form.Item label="Tên hiển thị" name="displayName" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="Loại nhân sự" name="employeeTypeId" rules={[{ required: true }]}><Select placeholder="Chọn loại nhân sự" options={types.data.filter((t) => t.isActive).map((t) => ({ value: t.id, label: t.name }))} /></Form.Item><Form.Item label="Phòng ban" name="departmentIds"><Select mode="multiple" placeholder="Chọn các phòng ban" options={departments.data.filter((d) => d.isActive).map((d) => ({ value: d.id, label: d.name }))} /></Form.Item></> },
+            ...(editing ? [{ key: "personal", label: "Thông tin cá nhân", children: <><p className="modal-description">Những thông tin còn trống sẽ được nhân sự tự cập nhật trên ứng dụng cá nhân.</p><Form.Item label="Số điện thoại" name="phone"><Input type="tel" autoComplete="tel" /></Form.Item><Form.Item label="CCCD" name="citizenId"><Input /></Form.Item><Form.Item label="Ngân hàng" name="bankName"><Input /></Form.Item><Form.Item label="Số tài khoản" name="bankAccountNumber"><Input inputMode="numeric" /></Form.Item></> }] : []),
+          ]} />
         </Form>
       </Modal>
       <Modal
@@ -878,9 +885,9 @@ export function EmployeesPage() {
           {types.data.map((t) => (
             <div key={t.id}>
               <span>
-                {t.name} <small>{t.code}</small>
+                {t.name}
               </span>
-              {status(t.isActive ? "ACTIVE" : "INACTIVE")}
+              <Select size="small" value={t.isActive ? "ACTIVE" : "INACTIVE"} options={["ACTIVE", "INACTIVE"].map((value) => ({ value, label: statuses[value] }))} onChange={(value) => void act(async () => { await request(`/employee-types/${t.id}`, { method: "PATCH", body: { isActive: value === "ACTIVE" } }); await types.load(); })} />
             </div>
           ))}
         </div>
@@ -897,13 +904,6 @@ export function EmployeesPage() {
               typeForm.resetFields();
           }}
         >
-          <Form.Item
-            name="code"
-            label="Mã (chữ hoa, số hoặc _)"
-            rules={[{ required: true, min: 2 }]}
-          >
-            <Input placeholder="VD: CAMERA" />
-          </Form.Item>
           <Form.Item name="name" label="Tên loại" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -912,8 +912,50 @@ export function EmployeesPage() {
           </Button>
         </Form>
       </Modal>
+      <Modal title="Phòng ban" open={departmentOpen} onCancel={() => setDepartmentOpen(false)} footer={null}>
+        <div className="type-list">{departments.data.map((department) => <div key={department.id}><span>{department.name}</span><Select size="small" value={department.isActive ? "ACTIVE" : "INACTIVE"} options={["ACTIVE", "INACTIVE"].map((value) => ({ value, label: statuses[value] }))} onChange={(value) => void act(async () => { await request(`/departments/${department.id}`, { method: "PATCH", body: { isActive: value === "ACTIVE" } }); await departments.load(); })} /></div>)}</div>
+        <Form form={departmentForm} layout="vertical" onFinish={async (v) => { if (await act(async () => { await request("/departments", { method: "POST", body: v }); await departments.load(); })) departmentForm.resetFields(); }}>
+          <Form.Item name="name" label="Tên phòng ban" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="description" label="Mô tả"><Input.TextArea rows={2} /></Form.Item>
+          <Button htmlType="submit" type="primary" icon={<PlusOutlined />}>Thêm phòng ban</Button>
+        </Form>
+      </Modal>
     </>
   );
+}
+
+export function ServicesPage() {
+  const [active, setActive] = useState("photo");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const view = location.pathname.endsWith("/history") ? "history" : "manage";
+  const [checked, setChecked] = useState<Record<string, boolean>>({ camera: true, batteries: true, uniform: false, greeting: true });
+  const services = [
+    { id: "photo", name: "Chụp ảnh", icon: <CameraOutlined />, tone: "photo", count: 3, description: "Ghi lại khoảnh khắc, ảnh sự kiện và chân dung." },
+    { id: "video", name: "Quay video", icon: <VideoCameraOutlined />, tone: "video", count: 2, description: "Quay phim, nội dung recap và phỏng vấn." },
+    { id: "pgiff", name: "P-Giff", icon: <CheckSquareOutlined />, tone: "pgiff", count: 2, description: "Tương tác khách mời, hoạt náo và tạo không khí." },
+  ];
+  const selected = services.find((service) => service.id === active)!;
+  const Checklist = ({ title, items }: { title: string; items: Array<[string, string]> }) => <section className="service-checklist"><h3>{title}</h3>{items.map(([id, label]) => <label key={id}><Checkbox checked={!!checked[id]} onChange={(event) => setChecked((current) => ({ ...current, [id]: event.target.checked }))}>{label}</Checkbox></label>)}</section>;
+  return <>
+    <Heading eyebrow="DỊCH VỤ" title="Dịch vụ" subtitle="Quản lý dịch vụ, đội ngũ và lịch sử thực hiện." extra={<Button type="primary" icon={<PlusOutlined />}>Tạo dịch vụ</Button>} />
+    <Segmented className="service-segmented" value={view} onChange={(value) => navigate(value === "history" ? "/services/history" : "/services")} options={[{ value: "manage", label: "Quản lý dịch vụ" }, { value: "history", label: "Lịch sử" }]} />
+    {view === "history" ? <Panel title="Lịch sử dịch vụ" description="Các dịch vụ đã thực hiện và nội dung được bàn giao."><GridTable data={[{ id: "history-1", name: "Chụp ảnh · Workshop Branding", date: "24/10/2026 18:00", crew: "3 nhân sự", result: "18 ảnh đã tải lên", state: "COMPLETED" }, { id: "history-2", name: "Quay video · Event nội bộ", date: "20/10/2026 09:30", crew: "2 nhân sự", result: "Đang chờ bàn giao", state: "IN_PROGRESS" }, { id: "history-3", name: "P-Giff · Kích hoạt thương hiệu", date: "17/10/2026 14:00", crew: "2 nhân sự", result: "Checklist hoàn tất", state: "COMPLETED" }]} loading={false} columns={[{ title: "DỊCH VỤ", dataIndex: "name" }, { title: "THỜI GIAN", dataIndex: "date" }, { title: "NHÂN SỰ", dataIndex: "crew" }, { title: "KẾT QUẢ", dataIndex: "result" }, { title: "TRẠNG THÁI", dataIndex: "state", render: status }, { title: "", render: () => <Button size="small">Xem chi tiết</Button> }]} /></Panel> : <>
+    <div className="service-types">{services.map((service) => <button key={service.id} className={`service-type ${service.tone} ${active === service.id ? "selected" : ""}`} onClick={() => setActive(service.id)}><span>{service.icon}</span><strong>{service.name}</strong><small>{service.count} nhân sự / dịch vụ</small></button>)}</div>
+    <div className="service-layout">
+      <Panel title={selected.name} description={selected.description} extra={<Tag color="processing">MOCKUP</Tag>}>
+        <div className="service-summary"><div><span>NHÂN SỰ CẦN CÓ</span><strong>{selected.count}</strong><small>có thể gán nhiều nhân sự theo ca</small></div><div><span>THÔNG TIN DỊCH VỤ</span><strong>Chưa thiết lập</strong><small>Thêm mô tả, thời lượng và yêu cầu khi sẵn sàng.</small></div></div>
+        <div className="service-photo"><div><CameraOutlined /><strong>Ảnh dịch vụ</strong><small>Ảnh mẫu, ảnh tham khảo hoặc ảnh sau khi hoàn thành.</small></div><Button icon={<UploadOutlined />}>Tải ảnh lên</Button></div>
+        <div className="service-assignees"><div><h3>Nhân sự được gán</h3><p>Nhân sự chụp ảnh có thể tải ảnh sau khi được gán vào dịch vụ.</p></div><div className="assignee-chip"><Initial name="Hung Thai"/><span><strong>Hưng Thái</strong><small>Nhiếp ảnh · Có quyền tải ảnh</small></span></div><Button icon={<PlusOutlined />}>Gán nhân sự</Button></div>
+      </Panel>
+      <Panel title="Checklist thực hiện" description="Mẫu checklist — sẽ liên kết dữ liệu dịch vụ sau.">
+        <Checklist title="Thiết bị" items={[["camera", "Máy ảnh / máy quay đã kiểm tra"], ["batteries", "Pin, thẻ nhớ và sạc dự phòng"], ["lighting", "Đèn và phụ kiện cần thiết"]]} />
+        <Checklist title="Trang phục" items={[["uniform", "Đồng phục sạch, đúng nhận diện"], ["badge", "Thẻ nhân sự / bảng tên"]]} />
+        <Checklist title="Giao tiếp" items={[["greeting", "Chào khách và xác nhận nhu cầu"], ["brief", "Nắm rõ brief, timeline và đầu mối"], ["handover", "Bàn giao ảnh / nội dung đúng quy trình"]]} />
+      </Panel>
+    </div>
+    </>}
+  </>;
 }
 
 export function CalendarPage() {
@@ -1579,7 +1621,7 @@ export function PointsPage() {
             onChange={setId}
             options={employees.data.map((e) => ({
               value: e.id,
-              label: `${e.displayName} · ${e.employeeCode}`,
+              label: `${e.displayName} · ${e.user?.email || ""}`,
             }))}
           />
           {id ? (
