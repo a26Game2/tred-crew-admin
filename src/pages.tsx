@@ -54,6 +54,7 @@ import dayjs from "dayjs";
 import { getSession, logout, query, request } from "./api";
 import { EventCalendar } from "./event-calendar";
 import { OfficeThreeScene, type OfficeMember, type OfficeRoom } from "./office-three";
+import { permissionGroups } from "./permissions";
 
 type Row = Record<string, any>;
 const date = (v?: string) => (v ? dayjs(v).format("DD/MM/YYYY HH:mm") : "—");
@@ -454,6 +455,7 @@ export function Dashboard() {
 }
 
 export function UsersPage() {
+  const isAdmin = getSession()?.user.role === "ADMIN";
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
@@ -489,11 +491,12 @@ export function UsersPage() {
       render: (v: string) => v || "—",
     },
     { title: "VAI TRÒ", dataIndex: "role", render: status },
+    { title: "QUYỀN XEM", dataIndex: "permissions", render: (value: string[], row: Row) => row.role === "ADMIN" ? <Tag color="green">Toàn quyền</Tag> : <span>{value?.length || 0} tab</span> },
     { title: "TRẠNG THÁI", dataIndex: "status", render: status },
     { title: "NGÀY TẠO", dataIndex: "createdAt", render: date },
     {
       title: "",
-      render: (_: any, r: Row) => (
+      render: (_: any, r: Row) => isAdmin ? (
         <Space>
           {r.status === "PENDING" && (
             <Button
@@ -544,7 +547,7 @@ export function UsersPage() {
             />
           )}
         </Space>
-      ),
+      ) : null,
     },
   ];
   return (
@@ -553,11 +556,11 @@ export function UsersPage() {
         eyebrow="QUẢN LÝ / TÀI KHOẢN"
         title="Tài khoản"
         subtitle="Quản lý quyền truy cập và duyệt thành viên mới."
-        extra={
+        extra={isAdmin ?
           <Button type="primary" icon={<PlusOutlined />} onClick={() => show()}>
             Thêm tài khoản
           </Button>
-        }
+        : undefined}
       />
       <Panel
         title="Danh sách tài khoản"
@@ -608,7 +611,7 @@ export function UsersPage() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ role: "EMPLOYEE" }}
+          initialValues={{ role: "EMPLOYEE", permissions: [] }}
           onFinish={async (v) => {
             if (
               await act(async () => {
@@ -656,6 +659,14 @@ export function UsersPage() {
               }))}
             />
           </Form.Item>
+          <Form.Item label="Quyền xem trên trang quản lý" name="permissions">
+            <Checkbox.Group style={{ width: "100%" }}>
+              <div className="permission-groups">
+                {permissionGroups.map((group) => <div className="permission-group" key={group.label}><strong>{group.label}</strong>{group.options.map((option) => <Checkbox key={option.value} value={option.value}>{option.label}</Checkbox>)}</div>)}
+              </div>
+            </Checkbox.Group>
+          </Form.Item>
+          <p className="modal-description">Tài khoản Admin luôn có toàn quyền. Các tài khoản khác chỉ thấy những tab được chọn.</p>
         </Form>
       </Modal>
       <Modal
