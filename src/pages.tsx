@@ -20,6 +20,7 @@ import {
   Tag,
   Tabs,
   Tooltip,
+  Upload,
 } from "antd";
 import {
   ArrowRightOutlined,
@@ -30,11 +31,16 @@ import {
   ClockCircleOutlined,
   CloudSyncOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
+  InboxOutlined,
   KeyOutlined,
   LinkOutlined,
+  ArrowLeftOutlined,
+  FileImageOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SaveOutlined,
   TeamOutlined,
   UserAddOutlined,
   UserOutlined,
@@ -43,7 +49,7 @@ import {
   UploadOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
 import { getSession, logout, query, request } from "./api";
 import { EventCalendar } from "./event-calendar";
@@ -210,6 +216,7 @@ function Panel({
 const empty = (
   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có dữ liệu" />
 );
+const tablePageSizeOptions = ["10", "20", "30"];
 function GridTable({
   data,
   loading,
@@ -221,7 +228,7 @@ function GridTable({
   loading: boolean;
   columns: any[];
   meta?: any;
-  onPage?: (page: number) => void;
+  onPage?: (page: number, pageSize: number) => void;
 }) {
   return (
     <Table
@@ -237,11 +244,12 @@ function GridTable({
               current: meta.page,
               pageSize: meta.pageSize,
               total: meta.total,
-              showSizeChanger: false,
+              showSizeChanger: true,
+              pageSizeOptions: tablePageSizeOptions,
               onChange: onPage,
               hideOnSinglePage: true,
             }
-          : { pageSize: 10, hideOnSinglePage: true }
+          : { defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true }
       }
     />
   );
@@ -447,6 +455,7 @@ export function Dashboard() {
 
 export function UsersPage() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string>();
   const [open, setOpen] = useState(false);
@@ -455,7 +464,7 @@ export function UsersPage() {
   const [form] = Form.useForm();
   const [passwordForm] = Form.useForm();
   const data = useData<Row[]>(
-    `/users${query({ page, pageSize: 20, search, status: filter })}`,
+    `/users${query({ page, pageSize, search, status: filter })}`,
     [],
   );
   const act = useAction();
@@ -585,7 +594,7 @@ export function UsersPage() {
           loading={data.loading}
           columns={columns}
           meta={data.meta}
-          onPage={setPage}
+          onPage={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }}
         />
       </Panel>
       <Modal
@@ -710,6 +719,7 @@ export function UsersPage() {
 
 export function EmployeesPage() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
@@ -719,7 +729,7 @@ export function EmployeesPage() {
   const [typeForm] = Form.useForm();
   const [departmentForm] = Form.useForm();
   const data = useData<Row[]>(
-    `/employees${query({ page, pageSize: 20, search })}`,
+    `/employees${query({ page, pageSize, search })}`,
     [],
   );
   const types = useData<Row[]>("/employee-types", []);
@@ -822,7 +832,7 @@ export function EmployeesPage() {
           loading={data.loading}
           columns={columns}
           meta={data.meta}
-          onPage={setPage}
+          onPage={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }}
         />
       </Panel>
       <Modal
@@ -938,7 +948,7 @@ export function ServicesPage() {
   const selected = services.find((service) => service.id === active)!;
   const Checklist = ({ title, items }: { title: string; items: Array<[string, string]> }) => <section className="service-checklist"><h3>{title}</h3>{items.map(([id, label]) => <label key={id}><Checkbox checked={!!checked[id]} onChange={(event) => setChecked((current) => ({ ...current, [id]: event.target.checked }))}>{label}</Checkbox></label>)}</section>;
   return <>
-    <Heading eyebrow="DỊCH VỤ" title="Dịch vụ" subtitle="Quản lý dịch vụ, đội ngũ và lịch sử thực hiện." extra={<Button type="primary" icon={<PlusOutlined />}>Tạo dịch vụ</Button>} />
+    <Heading eyebrow="THIẾT BỊ & VẬT TƯ / DỊCH VỤ" title="Danh sách dịch vụ" subtitle="Quản lý dịch vụ, đội ngũ và lịch sử thực hiện." extra={<Button type="primary" icon={<PlusOutlined />}>Tạo dịch vụ</Button>} />
     <Segmented className="service-segmented" value={view} onChange={(value) => navigate(value === "history" ? "/services/history" : "/services")} options={[{ value: "manage", label: "Quản lý dịch vụ" }, { value: "history", label: "Lịch sử" }]} />
     {view === "history" ? <Panel title="Lịch sử dịch vụ" description="Các dịch vụ đã thực hiện và nội dung được bàn giao."><GridTable data={[{ id: "history-1", name: "Chụp ảnh · Workshop Branding", date: "24/10/2026 18:00", crew: "3 nhân sự", result: "18 ảnh đã tải lên", state: "COMPLETED" }, { id: "history-2", name: "Quay video · Event nội bộ", date: "20/10/2026 09:30", crew: "2 nhân sự", result: "Đang chờ bàn giao", state: "IN_PROGRESS" }, { id: "history-3", name: "P-Giff · Kích hoạt thương hiệu", date: "17/10/2026 14:00", crew: "2 nhân sự", result: "Checklist hoàn tất", state: "COMPLETED" }]} loading={false} columns={[{ title: "DỊCH VỤ", dataIndex: "name" }, { title: "THỜI GIAN", dataIndex: "date" }, { title: "NHÂN SỰ", dataIndex: "crew" }, { title: "KẾT QUẢ", dataIndex: "result" }, { title: "TRẠNG THÁI", dataIndex: "state", render: status }, { title: "", render: () => <Button size="small">Xem chi tiết</Button> }]} /></Panel> : <>
     <div className="service-types">{services.map((service) => <button key={service.id} className={`service-type ${service.tone} ${active === service.id ? "selected" : ""}`} onClick={() => setActive(service.id)}><span>{service.icon}</span><strong>{service.name}</strong><small>{service.count} nhân sự / dịch vụ</small></button>)}</div>
@@ -973,6 +983,7 @@ export function CalendarPage() {
 
 export function EventsPage() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState<"week" | "month" | "choose">("week");
   const [chosenMonth, setChosenMonth] = useState(dayjs());
@@ -992,7 +1003,7 @@ export function EventsPage() {
     return { startFrom: month.startOf("month").toISOString(), startTo: month.endOf("month").toISOString(), label: `trong ${month.format("MM/YYYY")}` };
   }, [period, chosenMonth]);
   const data = useData<Row[]>(
-    `/events${query({ page, pageSize: 20, search, startFrom: dateRange.startFrom, startTo: dateRange.startTo })}`,
+    `/events${query({ page, pageSize, search, startFrom: dateRange.startFrom, startTo: dateRange.startTo })}`,
     [],
   );
   const employees = useData<Row[]>("/employees?pageSize=100", []);
@@ -1148,10 +1159,12 @@ export function EventsPage() {
                   current: data.meta.page,
                   pageSize: data.meta.pageSize,
                   total: data.meta.total,
-                  showSizeChanger: false,
-                  onChange: (next) => {
+                  showSizeChanger: true,
+                  pageSizeOptions: tablePageSizeOptions,
+                  onChange: (next, nextPageSize) => {
                     clearSelection();
                     setPage(next);
+                    setPageSize(nextPageSize);
                   },
                   hideOnSinglePage: true,
                 }
@@ -1351,7 +1364,8 @@ export function EventsPage() {
 
 export function AttendancePage() {
   const [page, setPage] = useState(1);
-  const data = useData<Row[]>(`/attendance?page=${page}&pageSize=20`, []);
+  const [pageSize, setPageSize] = useState(10);
+  const data = useData<Row[]>(`/attendance?page=${page}&pageSize=${pageSize}`, []);
   const employees = useData<Row[]>("/employees?pageSize=100", []);
   const [photo, setPhoto] = useState<string>();
   const act = useAction();
@@ -1438,7 +1452,7 @@ export function AttendancePage() {
           loading={data.loading}
           columns={columns}
           meta={data.meta}
-          onPage={setPage}
+          onPage={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }}
         />
       </Panel>
       <Modal
@@ -1685,8 +1699,9 @@ export function PointsPage() {
 
 export function AuditPage() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selected, setSelected] = useState<Row>();
-  const data = useData<Row[]>(`/audit-logs?page=${page}&pageSize=20`, []);
+  const data = useData<Row[]>(`/audit-logs?page=${page}&pageSize=${pageSize}`, []);
   const columns = [
     { title: "THỜI GIAN", dataIndex: "createdAt", render: date },
     { title: "HÀNH ĐỘNG", dataIndex: "action" },
@@ -1721,7 +1736,7 @@ export function AuditPage() {
           loading={data.loading}
           columns={columns}
           meta={data.meta}
-          onPage={setPage}
+          onPage={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }}
         />
       </Panel>
       <Modal
@@ -1978,6 +1993,294 @@ export function SettingsPage() {
       </div>
     </>
   );
+}
+
+type EquipmentImportRow = { name: string; model?: string; group: string; quantity?: number; serialNumber?: string; condition?: string; accessoryNotes?: string; managementStatus?: string; storageLocation?: string; custodian?: string; inventoryDate?: string; normalizedNote?: string };
+type EquipmentItem = Omit<EquipmentImportRow, "group"> & { id: number; qrCode: string; catalogGroup: { id: string; code: string; shortName?: string; name: string }; createdAt: string; updatedAt: string };
+type EquipmentImportResult = { created: number; failed: number; total: number; errors: { row: number; message: string }[] };
+const equipmentHeaders = ["Tên thiết bị", "Loại / Model", "Nhóm thiết bị", "Số lượng", "Mã tài sản / Serial", "Tình trạng", "Phụ kiện/ghi chú", "Trạng thái quản lý", "Vị trí lưu trữ", "Người phụ trách", "Ngày kiểm kê", "Ghi chú chuẩn hóa"];
+const equipmentFields: (keyof EquipmentImportRow)[] = ["name", "model", "group", "quantity", "serialNumber", "condition", "accessoryNotes", "managementStatus", "storageLocation", "custodian", "inventoryDate", "normalizedNote"];
+const textValue = (value: unknown) => value == null ? "" : String(value).trim();
+const csvRows = (text: string) => { const rows: string[][] = []; let row: string[] = []; let cell = ""; let quoted = false; for (let i = 0; i < text.length; i++) { const char = text[i]; if (char === '"' && quoted && text[i + 1] === '"') { cell += '"'; i++; } else if (char === '"') quoted = !quoted; else if (char === ',' && !quoted) { row.push(cell); cell = ""; } else if ((char === '\n' || char === '\r') && !quoted) { if (char === '\r' && text[i + 1] === '\n') i++; row.push(cell); if (row.some((value) => value.trim())) rows.push(row); row = []; cell = ""; } else cell += char; } row.push(cell); if (row.some((value) => value.trim())) rows.push(row); return rows; };
+const mapEquipmentRows = (rows: string[][]) => {
+  if (!rows.length) throw new Error("File không có dữ liệu");
+  const headers = rows[0].map((value) => value.trim().toLowerCase());
+  const indexes = equipmentHeaders.map((header) => headers.indexOf(header.toLowerCase()));
+  const missing = equipmentHeaders.filter((_, index) => indexes[index] < 0);
+  if (missing.length) throw new Error(`Thiếu cột: ${missing.join(", ")}`);
+  return rows.slice(1).filter((row) => row.some((value) => value.trim())).map((row) => {
+    const item = {} as Record<string, unknown>;
+    equipmentFields.forEach((field, index) => { const value = textValue(row[indexes[index]]); if (field === "quantity") item[field] = value ? Number(value) : 1; else if (value) item[field] = value; });
+    return item as EquipmentImportRow;
+  });
+};
+
+export function EquipmentListPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState("");
+  const [groupId, setGroupId] = useState<string>();
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<EquipmentImportRow[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<EquipmentImportResult>();
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const { message, modal } = App.useApp();
+  const path = `/equipment-items${query({ page, pageSize, search, groupId })}`;
+  const equipment = useData<EquipmentItem[]>(path, []);
+  const groups = useData<CatalogGroup[]>("/catalog/groups/equipment", []);
+  const parseFile = async (file: File) => {
+    try {
+      let rows: string[][];
+      if (file.name.toLowerCase().endsWith(".csv")) rows = csvRows(await file.text());
+      else {
+        const ExcelJS = await import("exceljs");
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await file.arrayBuffer());
+        const sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error("File Excel không có sheet dữ liệu");
+        rows = [];
+        sheet.eachRow({ includeEmpty: false }, (sheetRow) => { const values = equipmentHeaders.map((_, index) => { const cell = sheetRow.getCell(index + 1); if (index === 10 && cell.value instanceof Date) return cell.value.toISOString().slice(0, 10); return cell.text; }); rows.push(values); });
+      }
+      const mapped = mapEquipmentRows(rows);
+      if (mapped.length > 1000) throw new Error("Mỗi lần chỉ được import tối đa 1.000 dòng");
+      const invalid = mapped.findIndex((row) => !row.name || !row.group || !Number.isInteger(row.quantity) || Number(row.quantity) < 1);
+      if (invalid >= 0) throw new Error(`Dòng ${invalid + 2} thiếu tên, nhóm hoặc số lượng không hợp lệ`);
+      setFileName(file.name); setImportRows(mapped); setResult(undefined);
+    } catch (error) { setFileName(""); setImportRows([]); message.error(error instanceof Error ? error.message : "Không thể đọc file"); }
+  };
+  const downloadTemplate = async () => {
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Danh sách thiết bị", { views: [{ state: "frozen", ySplit: 1 }] });
+    sheet.addRow(equipmentHeaders);
+    sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF244D6B" } }; sheet.getRow(1).alignment = { vertical: "middle", horizontal: "center", wrapText: true }; sheet.getRow(1).height = 32;
+    [26, 18, 20, 10, 22, 28, 28, 20, 20, 20, 16, 28].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+    sheet.getColumn(4).numFmt = "0"; sheet.getColumn(11).numFmt = "yyyy-mm-dd"; sheet.autoFilter = { from: "A1", to: "L1" };
+    const guide = workbook.addWorksheet("Hướng dẫn"); guide.addRows([["Hướng dẫn import thiết bị"], ["Tên thiết bị và Nhóm thiết bị là bắt buộc."], ["Nhóm thiết bị nhận tên viết tắt (LIGHT, CAMERA...) hoặc tên đầy đủ."], ["Ngày kiểm kê dùng định dạng yyyy-mm-dd."], ["Mỗi dòng hợp lệ sẽ tạo một thiết bị với ID tự tăng trong hệ thống."]]); guide.getColumn(1).width = 85; guide.getRow(1).font = { bold: true, size: 14 };
+    const buffer = await workbook.xlsx.writeBuffer(); const url = URL.createObjectURL(new Blob([buffer as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); const link = document.createElement("a"); link.href = url; link.download = "mau-import-thiet-bi.xlsx"; link.click(); URL.revokeObjectURL(url);
+  };
+  const runImport = async () => { setImporting(true); try { const response = await request<EquipmentImportResult>("/equipment-items/import", { method: "POST", body: { rows: importRows } }); setResult(response.data); message.success(`Đã thêm ${response.data.created} thiết bị`); await equipment.load(); } catch (error) { message.error(error instanceof Error ? error.message : "Import thất bại"); } finally { setImporting(false); } };
+  const removeSelected = () => {
+    const count = selectedIds.length;
+    if (!count) return;
+    modal.confirm({
+      title: count === 1 ? "Xóa thiết bị đã chọn?" : `Xóa ${count} thiết bị đã chọn?`,
+      content: "Dữ liệu thiết bị và mã QR tương ứng sẽ bị xóa khỏi hệ thống.",
+      okText: "Xóa",
+      cancelText: "Hủy",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          const response = await request<{ deleted: number; requested: number }>("/equipment-items", { method: "DELETE", body: { ids: selectedIds } });
+          setSelectedIds([]);
+          message.success(`Đã xóa ${response.data.deleted} thiết bị`);
+          await equipment.load();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "Không thể xóa thiết bị");
+          throw error;
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+  const columns = [
+    { title: "Tên thiết bị", dataIndex: "name", width: 190, render: (value: string, row: EquipmentItem) => <Link className="equipment-name-link" to={`/equipment/${row.id}`}>{value}</Link> },
+    { title: "Loại / Model", dataIndex: "model", width: 150, render: (value?: string) => value || "—" },
+    { title: "Nhóm thiết bị", dataIndex: "catalogGroup", width: 160, render: (group: EquipmentItem["catalogGroup"]) => <div><Tag>{group.shortName || group.code}</Tag><div className="subline">{group.name}</div></div> },
+    { title: "SL", dataIndex: "quantity", width: 65 }, { title: "Mã tài sản / Serial", dataIndex: "serialNumber", width: 170, render: (value?: string) => value || "—" },
+    { title: "Tình trạng", dataIndex: "condition", width: 220, render: (value?: string) => value || "—" }, { title: "Phụ kiện / ghi chú", dataIndex: "accessoryNotes", width: 200, render: (value?: string) => value || "—" },
+    { title: "Trạng thái quản lý", dataIndex: "managementStatus", width: 160, render: (value?: string) => value ? <Tag>{value}</Tag> : "—" }, { title: "Vị trí lưu trữ", dataIndex: "storageLocation", width: 160, render: (value?: string) => value || "—" },
+    { title: "Người phụ trách", dataIndex: "custodian", width: 160, render: (value?: string) => value || "—" }, { title: "Ngày kiểm kê", dataIndex: "inventoryDate", width: 125, render: (value?: string) => value ? dayjs(value).format("DD/MM/YYYY") : "—" },
+    { title: "Ghi chú chuẩn hóa", dataIndex: "normalizedNote", width: 220, render: (value?: string) => value || "—" },
+    { title: "Thao tác", key: "actions", fixed: "right" as const, width: 130, render: (_: unknown, row: EquipmentItem) => <Link to={`/equipment/${row.id}`}><Button icon={<EditOutlined/>} aria-label={`Quản lý thiết bị ${row.name}`}>Quản lý</Button></Link> },
+  ];
+  return <>
+    <Heading eyebrow="THIẾT BỊ / DANH SÁCH" title="Danh sách thiết bị" subtitle="Theo dõi thiết bị, tình trạng, vị trí lưu trữ và lịch kiểm kê." extra={<Space wrap><Button icon={<DownloadOutlined/>} onClick={() => void downloadTemplate()}>Tải file mẫu</Button><Button type="primary" icon={<UploadOutlined/>} onClick={() => { setImportOpen(true); setImportRows([]); setFileName(""); setResult(undefined); }}>Import thiết bị</Button></Space>}/>
+    <ErrorNotice error={equipment.error}/><Panel title="Thiết bị" description={`${equipment.meta?.total ?? 0} thiết bị trong hệ thống`}><div className="equipment-filters"><Input.Search allowClear placeholder="Quét mã QR hoặc tìm tên, model, serial..." onSearch={(value) => { setSearch(value); setPage(1); setSelectedIds([]); }} style={{ width: 360 }}/><Select allowClear placeholder="Lọc theo nhóm thiết bị" value={groupId} onChange={(value) => { setGroupId(value); setPage(1); setSelectedIds([]); }} style={{ width: 240 }} options={groups.data.map((group) => ({ value: group.id, label: `${group.shortName || group.code} — ${group.name}` }))}/><Button icon={<ReloadOutlined/>} onClick={() => void equipment.load()} loading={equipment.loading}>Làm mới</Button><Button danger icon={<DeleteOutlined/>} disabled={!selectedIds.length} loading={deleting} onClick={removeSelected}>Xóa{selectedIds.length ? ` (${selectedIds.length})` : ""}</Button></div><Table rowKey="id" loading={equipment.loading} columns={columns} dataSource={equipment.data} rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys.map(Number)), getCheckboxProps: () => ({ disabled: deleting }) }} scroll={{ x: 1930 }} pagination={{ current: equipment.meta?.page, pageSize: equipment.meta?.pageSize || pageSize, total: equipment.meta?.total, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true, onChange: (nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); setSelectedIds([]); } }} locale={{ emptyText: empty }}/></Panel>
+    <Modal width={1000} title="Import danh sách thiết bị" open={importOpen} onCancel={() => setImportOpen(false)} footer={result ? <Button type="primary" onClick={() => setImportOpen(false)}>Đóng</Button> : [<Button key="cancel" onClick={() => setImportOpen(false)}>Hủy</Button>, <Button key="import" type="primary" disabled={!importRows.length} loading={importing} onClick={() => void runImport()}>Import {importRows.length || ""} dòng</Button>]} destroyOnHidden>
+      <Upload.Dragger accept=".xlsx,.csv" maxCount={1} showUploadList={false} beforeUpload={(file) => { void parseFile(file); return false; }}><p className="ant-upload-drag-icon"><InboxOutlined/></p><p className="ant-upload-text">Chọn hoặc kéo file Excel/CSV vào đây</p><p className="ant-upload-hint">Dùng file mẫu để đảm bảo đúng 12 cột. Tối đa 1.000 dòng/lần.</p></Upload.Dragger>
+      {fileName && <div className="import-file-summary"><strong>{fileName}</strong><span>{importRows.length} dòng hợp lệ để gửi</span></div>}
+      {!!importRows.length && !result && <Table size="small" rowKey={(_, index) => String(index)} pagination={false} scroll={{ x: 800, y: 280 }} dataSource={importRows.slice(0, 8)} columns={[{ title: "Tên thiết bị", dataIndex: "name", width: 180 }, { title: "Model", dataIndex: "model", width: 130 }, { title: "Nhóm", dataIndex: "group", width: 130 }, { title: "SL", dataIndex: "quantity", width: 60 }, { title: "Tình trạng", dataIndex: "condition", width: 200 }]}/>}
+      {result && <div className="import-result"><strong>Kết quả import</strong><div><Tag color="success">Thêm mới: {result.created}</Tag><Tag color={result.failed ? "error" : "default"}>Lỗi: {result.failed}</Tag></div>{result.errors.map((error) => <p key={error.row}>Dòng {error.row}: {error.message}</p>)}</div>}
+    </Modal>
+  </>;
+}
+
+export function MaterialListPage() {
+  const groups = useData<CatalogGroup[]>("/catalog/groups/material", []);
+  const [groupId, setGroupId] = useState<string>();
+  const [search, setSearch] = useState("");
+  const columns = [
+    { title: "Tên vật tư", dataIndex: "name", width: 220 },
+    { title: "Nhóm vật tư", dataIndex: "group", width: 190 },
+    { title: "Đơn vị tính", dataIndex: "unit", width: 130 },
+    { title: "Số lượng tồn", dataIndex: "quantity", width: 130 },
+    { title: "Vị trí lưu trữ", dataIndex: "storageLocation", width: 180 },
+    { title: "Ghi chú", dataIndex: "note", width: 260 },
+    { title: "Thao tác", key: "actions", fixed: "right" as const, width: 120 },
+  ];
+  return <>
+    <Heading eyebrow="THIẾT BỊ & VẬT TƯ / DANH SÁCH" title="Danh sách vật tư" subtitle="Theo dõi vật tư tiêu hao, số lượng tồn và vị trí lưu trữ."/>
+    <ErrorNotice error={groups.error}/>
+    <Panel title="Vật tư" description="0 vật tư trong hệ thống">
+      <div className="equipment-filters"><Input.Search allowClear placeholder="Tìm tên vật tư..." value={search} onChange={(event) => setSearch(event.target.value)} style={{ width: 320 }}/><Select allowClear placeholder="Lọc theo nhóm vật tư" value={groupId} onChange={setGroupId} style={{ width: 250 }} options={groups.data.map((group) => ({ value: group.id, label: `${group.code} — ${group.name}` }))}/><Button icon={<ReloadOutlined/>} onClick={() => void groups.load()} loading={groups.loading}>Làm mới</Button></div>
+      <Table rowKey="id" loading={groups.loading} columns={columns} dataSource={[]} scroll={{ x: 1150 }} pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có dữ liệu vật tư"/> }}/>
+    </Panel>
+  </>;
+}
+
+type EquipmentPhoto = { id: string; fileName?: string; mimeType: string; createdAt: string };
+type EquipmentNote = { id: string; content: string; createdAt: string; createdBy: { id: string; fullName: string } };
+type EquipmentDetail = EquipmentItem & { images: EquipmentPhoto[]; notes: EquipmentNote[] };
+
+function EquipmentPhotoCard({ equipmentId, photo, onDelete }: { equipmentId: number; photo: EquipmentPhoto; onDelete: () => void }) {
+  const [source, setSource] = useState("");
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    void request<Blob>(`/equipment-items/${equipmentId}/images/${photo.id}`, { raw: true }).then((response) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(response.data);
+      setSource(objectUrl);
+    }).catch(() => setSource(""));
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [equipmentId, photo.id]);
+  return <figure className="equipment-photo-card">
+    {source ? <img src={source} alt={photo.fileName || "Ảnh thiết bị"}/> : <div className="equipment-photo-loading"><FileImageOutlined/></div>}
+    <figcaption><span title={photo.fileName}>{photo.fileName || "Ảnh thiết bị"}</span><Popconfirm title="Xóa ảnh này?" okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={onDelete}><Button type="text" danger aria-label="Xóa ảnh" icon={<DeleteOutlined/>}/></Popconfirm></figcaption>
+  </figure>;
+}
+
+const fileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Không thể đọc ảnh")); reader.readAsDataURL(file); });
+
+export function EquipmentDetailPage() {
+  const params = useParams();
+  const equipmentId = Number(params.id);
+  const equipment = useData<EquipmentDetail | null>(`/equipment-items/${equipmentId}`, null);
+  const groups = useData<CatalogGroup[]>("/catalog/groups/equipment", []);
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(0);
+  const [note, setNote] = useState("");
+  const [addingNote, setAddingNote] = useState(false);
+  const { message } = App.useApp();
+  useEffect(() => {
+    const item = equipment.data;
+    if (!item) return;
+    form.setFieldsValue({ ...item, catalogGroupId: item.catalogGroup.id, inventoryDate: item.inventoryDate ? dayjs(item.inventoryDate) : null });
+  }, [equipment.data, form]);
+  const save = async (values: Row) => {
+    setSaving(true);
+    try {
+      await request(`/equipment-items/${equipmentId}`, { method: "PATCH", body: { ...values, inventoryDate: values.inventoryDate ? values.inventoryDate.format("YYYY-MM-DD") : null } });
+      message.success("Đã cập nhật thông tin thiết bị");
+      await equipment.load();
+    } catch (error) { message.error(error instanceof Error ? error.message : "Không thể cập nhật thiết bị"); }
+    finally { setSaving(false); }
+  };
+  const uploadPhoto = async (file: File) => {
+    if (file.size > 3_000_000) throw new Error(`${file.name} vượt quá 3 MB`);
+    const dataUrl = await fileAsDataUrl(file);
+    await request(`/equipment-items/${equipmentId}/images`, { method: "POST", body: { fileName: file.name, dataUrl } });
+  };
+  const removePhoto = async (photoId: string) => { try { await request(`/equipment-items/${equipmentId}/images/${photoId}`, { method: "DELETE" }); message.success("Đã xóa ảnh"); await equipment.load(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể xóa ảnh"); } };
+  const addNote = async () => {
+    if (!note.trim()) return;
+    setAddingNote(true);
+    try { await request(`/equipment-items/${equipmentId}/notes`, { method: "POST", body: { content: note.trim() } }); setNote(""); message.success("Đã thêm ghi chú"); await equipment.load(); }
+    catch (error) { message.error(error instanceof Error ? error.message : "Không thể thêm ghi chú"); }
+    finally { setAddingNote(false); }
+  };
+  const item = equipment.data;
+  return <>
+    <Heading eyebrow="THIẾT BỊ / CHI TIẾT" title={item?.name || "Chi tiết thiết bị"} subtitle="Cập nhật thông tin, hình ảnh và theo dõi lịch sử tình trạng thiết bị." extra={<Link to="/equipment"><Button icon={<ArrowLeftOutlined/>}>Danh sách thiết bị</Button></Link>}/>
+    <ErrorNotice error={equipment.error}/>
+    {equipment.loading && !item ? <div className="equipment-detail-loading"><Spin/></div> : item ? <div className="equipment-detail-layout">
+      <Panel title="Thông tin thiết bị" description="Chỉnh sửa thông số và thông tin quản lý." extra={<Button type="primary" icon={<SaveOutlined/>} loading={saving} onClick={() => form.submit()}>Lưu thay đổi</Button>}>
+        <Form form={form} layout="vertical" onFinish={(values) => void save(values)}>
+          <div className="form-pair"><Form.Item name="name" label="Tên thiết bị" rules={[{ required: true, message: "Nhập tên thiết bị" }]}><Input maxLength={200}/></Form.Item><Form.Item name="model" label="Loại / Model"><Input maxLength={150}/></Form.Item></div>
+          <div className="form-pair"><Form.Item name="catalogGroupId" label="Nhóm thiết bị" rules={[{ required: true }]}><Select options={groups.data.map((group) => ({ value: group.id, label: `${group.shortName || group.code} — ${group.name}` }))}/></Form.Item><Form.Item name="quantity" label="Số lượng" rules={[{ required: true }]}><InputNumber min={1} max={10000} style={{ width: "100%" }}/></Form.Item></div>
+          <div className="form-pair"><Form.Item name="serialNumber" label="Mã tài sản / Serial"><Input maxLength={150}/></Form.Item><Form.Item name="managementStatus" label="Trạng thái quản lý"><Input maxLength={100}/></Form.Item></div>
+          <div className="form-pair"><Form.Item name="storageLocation" label="Vị trí lưu trữ"><Input maxLength={200}/></Form.Item><Form.Item name="custodian" label="Người phụ trách"><Input maxLength={150}/></Form.Item></div>
+          <div className="form-pair"><Form.Item name="inventoryDate" label="Ngày kiểm kê"><DatePicker style={{ width: "100%" }} format="DD/MM/YYYY"/></Form.Item><Form.Item name="normalizedNote" label="Ghi chú chuẩn hóa"><Input maxLength={500}/></Form.Item></div>
+          <Form.Item name="condition" label="Tình trạng thiết bị"><Input.TextArea rows={3} maxLength={500} showCount/></Form.Item>
+          <Form.Item name="accessoryNotes" label="Phụ kiện / ghi chú"><Input.TextArea rows={3} maxLength={500} showCount/></Form.Item>
+        </Form>
+      </Panel>
+      <div className="equipment-detail-side">
+        <Panel title="Hình ảnh thiết bị" description={`${item.images.length} ảnh đã lưu`} extra={<Upload multiple accept="image/jpeg,image/png,image/webp" showUploadList={false} customRequest={({ file, onSuccess, onError }) => { setUploading((value) => value + 1); void uploadPhoto(file as File).then(async () => { onSuccess?.({}); message.success(`Đã tải lên ${(file as File).name}`); await equipment.load(); }).catch((error) => { onError?.(error as Error); message.error(error instanceof Error ? error.message : "Không thể tải ảnh"); }).finally(() => setUploading((value) => value - 1)); }}><Button icon={<UploadOutlined/>} loading={uploading > 0}>Thêm ảnh</Button></Upload>}>
+          {item.images.length ? <div className="equipment-photo-grid">{item.images.map((photo) => <EquipmentPhotoCard key={photo.id} equipmentId={item.id} photo={photo} onDelete={() => void removePhoto(photo.id)}/>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có ảnh thiết bị"/>}
+        </Panel>
+        <Panel title="Lịch sử ghi chú" description="Ghi chú mới được lưu thành từng mốc thời gian.">
+          <div className="equipment-note-compose"><Input.TextArea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={2000} showCount placeholder="Thiết bị đang gặp vấn đề gì?"/><Button type="primary" disabled={!note.trim()} loading={addingNote} onClick={() => void addNote()}>Thêm ghi chú</Button></div>
+          {item.notes.length ? <div className="equipment-note-timeline">{item.notes.map((entry) => <article key={entry.id}><i/><div><header><strong>{entry.createdBy.fullName}</strong><time>{date(entry.createdAt)}</time></header><p>{entry.content}</p></div></article>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có lịch sử ghi chú"/>}
+        </Panel>
+      </div>
+    </div> : !equipment.loading && <Empty description="Không tìm thấy thiết bị"/>}
+  </>;
+}
+
+type CatalogKind = "equipment" | "material" | "service";
+type CatalogGroup = { id: string; code: string; shortName?: string; name: string; description: string; examples: string[]; aliases: string[]; note?: string };
+type CatalogGroups = Record<CatalogKind, CatalogGroup[]>;
+const emptyCatalog: CatalogGroups = { equipment: [], material: [], service: [] };
+const catalogKinds: { key: CatalogKind; label: string; singular: string }[] = [
+  { key: "equipment", label: "Nhóm thiết bị", singular: "nhóm thiết bị" },
+  { key: "material", label: "Nhóm vật tư", singular: "nhóm vật tư" },
+  { key: "service", label: "Nhóm dịch vụ", singular: "nhóm dịch vụ" },
+];
+const catalogPrefixes: Record<CatalogKind, string> = { equipment: "TB", material: "VT", service: "DV" };
+
+export function CatalogPage() {
+  const catalog = useData<CatalogGroups>("/catalog/groups", emptyCatalog);
+  const [kind, setKind] = useState<CatalogKind>("equipment");
+  const [editing, setEditing] = useState<CatalogGroup>();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [form] = Form.useForm();
+  const act = useAction();
+  const kindInfo = catalogKinds.find((item) => item.key === kind)!;
+  const openCreate = () => { setEditing(undefined); form.resetFields(); setEditorOpen(true); };
+  const openEdit = (group: CatalogGroup) => { setEditing(group); form.setFieldsValue({ ...group, examplesText: group.examples.join(", "), aliasesText: group.aliases.join(", ") }); setEditorOpen(true); };
+  const save = async (values: Record<string, unknown>) => {
+    const examples = String(values.examplesText || "").split(",").map((item) => item.trim()).filter(Boolean);
+    const aliases = String(values.aliasesText || "").split(",").map((item) => item.trim()).filter(Boolean);
+    const body = { shortName: kind === "equipment" ? values.shortName : undefined, name: values.name, description: values.description, examples, aliases, note: values.note || "" };
+    const saved = await act(() => request(editing ? `/catalog/groups/${kind}/${editing.code}` : `/catalog/groups/${kind}`, { method: editing ? "PATCH" : "POST", body }), editing ? "Đã cập nhật nhóm" : "Đã thêm nhóm");
+    if (saved) { setEditorOpen(false); setEditing(undefined); await catalog.load(); }
+  };
+  const remove = async (group: CatalogGroup) => { const removed = await act(() => request(`/catalog/groups/${kind}/${group.code}`, { method: "DELETE" }), "Đã xoá nhóm"); if (removed) await catalog.load(); };
+  const columns = [
+    { title: "Mã nhóm", dataIndex: "code", width: 120, render: (code: string) => <code className="catalog-code">{code}</code> },
+    ...(kind === "equipment" ? [{ title: "Tên viết tắt", dataIndex: "shortName", width: 145, render: (shortName: string | undefined) => shortName ? <code className="catalog-short-name">{shortName}</code> : "—" }] : []),
+    { title: "Tên nhóm", dataIndex: "name", render: (name: string, row: CatalogGroup) => <div><strong>{name}</strong><div className="subline">{row.description}</div></div> },
+    { title: "Ví dụ", dataIndex: "examples", render: (examples: string[]) => examples.length ? <div className="catalog-tags">{examples.map((example) => <Tag key={example}>{example}</Tag>)}</div> : "—" },
+    { title: "Alias import", dataIndex: "aliases", width: 240, render: (aliases: string[]) => aliases.length ? <div className="catalog-tags">{aliases.map((alias) => <Tag key={alias} color="blue">{alias}</Tag>)}</div> : "—" },
+    { title: "", width: 104, render: (_: unknown, row: CatalogGroup) => <Space size={2}><Tooltip title="Chỉnh sửa nhóm"><Button type="text" aria-label={`Chỉnh sửa ${row.name}`} icon={<EditOutlined/>} onClick={() => openEdit(row)}/></Tooltip><Popconfirm title="Xoá nhóm này?" description={`Mã ${row.code} sẽ bị xoá khỏi danh mục.`} okText="Xoá" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={() => void remove(row)}><Tooltip title="Xoá nhóm"><Button type="text" danger aria-label={`Xoá ${row.name}`} icon={<DeleteOutlined/>}/></Tooltip></Popconfirm></Space> },
+  ];
+  return <>
+    <Heading eyebrow="THIẾT BỊ / DANH MỤC" title="Quản lý nhóm" subtitle="Thêm, sửa và xoá các nhóm thiết bị, vật tư và dịch vụ dùng chung trong hệ thống." extra={<Space><Button icon={<ReloadOutlined/>} onClick={() => void catalog.load()} loading={catalog.loading}>Làm mới</Button><Button type="primary" icon={<PlusOutlined/>} onClick={openCreate}>Thêm nhóm</Button></Space>}/>
+    <ErrorNotice error={catalog.error}/>
+    <Panel title="Danh mục nhóm dùng chung" description="Dữ liệu được lưu trong PostgreSQL. Mã nhóm phải duy nhất trong từng loại nhóm.">
+      <Tabs activeKey={kind} onChange={(key) => setKind(key as CatalogKind)} items={catalogKinds.map((item) => ({ key: item.key, label: `${item.label} (${catalog.data[item.key].length})` }))}/>
+      <Table rowKey="code" loading={catalog.loading} columns={columns} dataSource={catalog.data[kind]} scroll={{ x: 760 }} pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true }} locale={{ emptyText: empty }}/>
+    </Panel>
+    <Modal title={editing ? `Chỉnh sửa ${editing.code}` : `Thêm ${kindInfo.singular}`} open={editorOpen} onCancel={() => { setEditorOpen(false); setEditing(undefined); }} onOk={() => form.submit()} okText={editing ? "Lưu thay đổi" : "Thêm nhóm"} cancelText="Hủy" destroyOnHidden>
+      <Form form={form} layout="vertical" onFinish={(values) => void save(values)}>
+        {!editing && <div className="catalog-code-notice"><strong>Mã nhóm được tạo tự động</strong><span>{catalogPrefixes[kind]}_001 → {catalogPrefixes[kind]}_998 · mã {catalogPrefixes[kind]}_999 dành cho nhóm chưa phân loại</span></div>}
+        {kind === "equipment" && <Form.Item name="shortName" label="Tên viết tắt" extra="Tên ngắn giúp người dùng nhận biết và chọn nhóm thiết bị nhanh hơn." normalize={(value) => String(value || "").toUpperCase()} rules={[{ required: true, message: "Vui lòng nhập tên viết tắt" }, { pattern: /^[A-Z0-9_]+$/, message: "Chỉ dùng chữ in hoa, số và dấu gạch dưới" }]}><Input placeholder="Ví dụ: LIGHT, CAMERA, POWER" maxLength={20}/></Form.Item>}
+        <Form.Item name="name" label="Tên nhóm" rules={[{ required: true, message: "Vui lòng nhập tên nhóm" }]}><Input maxLength={100}/></Form.Item>
+        <Form.Item name="description" label="Mô tả" rules={[{ required: true, message: "Vui lòng nhập mô tả" }]}><Input.TextArea rows={3} maxLength={500}/></Form.Item>
+        <Form.Item name="examplesText" label="Ví dụ" extra="Ngăn cách các ví dụ bằng dấu phẩy."><Input placeholder="Ví dụ: Canon, Nikon, Lens" maxLength={500}/></Form.Item>
+        <Form.Item name="aliasesText" label="Alias import" extra="Các tên khác có thể xuất hiện trong file import, ngăn cách bằng dấu phẩy."><Input.TextArea rows={2} placeholder="Ví dụ: Máy tính/màn hình, PC và màn hình" maxLength={1000}/></Form.Item>
+        <Form.Item name="note" label={kind === "material" ? "Đơn vị tính mẫu / ghi chú" : "Ghi chú"}><Input maxLength={200}/></Form.Item>
+      </Form>
+    </Modal>
+  </>;
 }
 
 export function ComingSoonPage({ type }: { type: "equipment" | "guidelines" }) {
