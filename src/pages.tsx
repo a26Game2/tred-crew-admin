@@ -53,7 +53,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
 import { getSession, logout, query, request } from "./api";
 import { EventCalendar } from "./event-calendar";
-import { OfficeThreeScene, type OfficeMember, type OfficeRoom } from "./office-three";
+import { Office25DScene, Outdoor25DScene, type OfficeEventGroup, type OfficeMember, type OfficeRoom } from "./office-25d";
 import { permissionGroups } from "./permissions";
 
 type Row = Record<string, any>;
@@ -120,23 +120,60 @@ function useData<T>(path: string, fallback: T) {
   return { data, loading, error, meta, load };
 }
 
-type OfficeEmployee = { id: string; displayName: string; avatarUrl?: string | null; employeeType: { name: string }; attendance?: { checkInAt: string; checkOutAt?: string | null } | null };
+type OfficeEmployee = OfficeMember;
 type OfficeDepartment = { id: string; name: string; description?: string | null; employees: OfficeEmployee[] };
 type OfficeOverview = { today: string; departments: OfficeDepartment[] };
+type OfficePresence = "WORKING" | "EVENT" | "OFFLINE";
 const initials = (name: string) => name.trim().split(/\s+/).slice(-2).map((part) => part[0]).join('').toUpperCase();
+const officePresence = (member: OfficeEmployee): OfficePresence => member.attendance?.type === "EVENT" ? "EVENT" : member.attendance && !member.attendance.checkOutAt ? "WORKING" : "OFFLINE";
+const officePresenceLabel: Record<OfficePresence, string> = { WORKING: "Đang làm việc", EVENT: "Đi sự kiện", OFFLINE: "Chưa check-in" };
+const officePresenceColor: Record<OfficePresence, string> = { WORKING: "success", EVENT: "warning", OFFLINE: "default" };
+const elapsedWorkTime = (checkInAt?: string) => { if (!checkInAt) return "—"; const minutes = Math.max(0, dayjs().diff(dayjs(checkInAt), "minute")); return `${Math.floor(minutes / 60)}g ${minutes % 60}p`; };
 
 export function OfficePage() {
   const office = useData<OfficeOverview>('/employees/office/overview', { today: '', departments: [] });
   const [selected, setSelected] = useState<{ member: OfficeMember; department: OfficeRoom }>();
-  const activeCount = office.data.departments.reduce((total, department) => total + department.employees.filter((employee) => employee.attendance && !employee.attendance.checkOutAt).length, 0);
-  const uniqueCount = new Set(office.data.departments.flatMap((department) => department.employees.map((employee) => employee.id))).size;
+  const [officeView, setOfficeView] = useState<"OFFICE" | "OUTDOOR" | "LIST">("OFFICE");
+  const [officeSearch, setOfficeSearch] = useState("");
+  const [departmentId, setDepartmentId] = useState<string>();
+  const [presence, setPresence] = useState<OfficePresence | "ALL">("ALL");
+  const departments = useMemo(() => {
+    const assignedEmployeeIds = new Set<string>();
+    return office.data.departments.map((department) => ({ ...department, employees: department.employees.filter((employee) => {
+      if (assignedEmployeeIds.has(employee.id)) return false;
+      assignedEmployeeIds.add(employee.id);
+      return true;
+    }) }));
+  }, [office.data.departments]);
+  const allMembers = useMemo(() => departments.flatMap((department) => department.employees.map((member) => ({ member, department }))), [departments]);
+  const matchesFilters = useCallback((member: OfficeMember, department: OfficeRoom) => (!departmentId || department.id === departmentId) && (!officeSearch.trim() || member.displayName.toLocaleLowerCase("vi").includes(officeSearch.trim().toLocaleLowerCase("vi"))), [departmentId, officeSearch]);
+  const visibleMembers = useMemo(() => allMembers.filter(({ member, department }) => matchesFilters(member, department) && (presence === "ALL" || officePresence(member) === presence)), [allMembers, matchesFilters, presence]);
+  const officeDepartments = useMemo(() => departments.filter((department) => !departmentId || department.id === departmentId).map((department) => ({ ...department, employees: department.employees.filter((member) => matchesFilters(member, department) && officePresence(member) !== "EVENT" && (presence === "ALL" || officePresence(member) === presence)) })), [departments, departmentId, matchesFilters, presence]);
+  const eventGroups = useMemo<OfficeEventGroup[]>(() => {
+    const groups = new Map<string, OfficeEventGroup>();
+    for (const { member, department } of allMembers) {
+      if (!matchesFilters(member, department) || officePresence(member) !== "EVENT") continue;
+      const event = member.attendance?.event;
+      const id = event?.id ?? "event-unknown";
+      const group = groups.get(id) ?? { id, name: event?.name ?? "Sự kiện đang diễn ra", location: event?.location, members: [] };
+      group.members.push({ member, room: department }); groups.set(id, group);
+    }
+    return [...groups.values()];
+  }, [allMembers, matchesFilters]);
+  const activeCount = allMembers.filter(({ member }) => officePresence(member) === "WORKING").length;
+  const eventCount = allMembers.filter(({ member }) => officePresence(member) === "EVENT").length;
+  const uniqueCount = departments.reduce((total, department) => total + department.employees.length, 0);
   const selectMember = useCallback((member: OfficeMember, department: OfficeRoom) => setSelected({ member, department }), []);
+  const changePresence = useCallback((value: OfficePresence | "ALL") => { setPresence(value); if (value === "EVENT") setOfficeView("OUTDOOR"); else if (value !== "ALL") setOfficeView("OFFICE"); }, []);
   return <>
     <Heading eyebrow="KHÔNG GIAN LÀM VIỆC" title="Văn phòng TRED" subtitle="Theo dõi vị trí phòng ban và trạng thái làm việc hôm nay." extra={<Button icon={<ReloadOutlined/>} onClick={() => void office.load()} loading={office.loading}>Làm mới</Button>}/>
     {office.error ? <Card className="office-error">Không thể tải văn phòng: {office.error}</Card> : <Card className="office-card" bordered={false}>
-      <div className="office-topline"><div><span className="office-logo">T</span><div><strong>TRED OFFICE</strong><small>Không gian làm việc hôm nay</small></div></div><div className="office-summary"><span><b>{activeCount}</b> đang làm việc</span><span><b>{uniqueCount}</b> nhân sự</span></div></div>
-      <div className="office-three-wrap"><OfficeThreeScene departments={office.data.departments} onSelect={selectMember}/>{selected && <aside className="office-member-card"><button aria-label="Đóng" onClick={() => setSelected(undefined)}>×</button><span className="office-member-avatar">{initials(selected.member.displayName)}</span><strong>{selected.member.displayName}</strong><small>{selected.member.employeeType.name} · {selected.department.name}</small><em className={selected.member.attendance && !selected.member.attendance.checkOutAt ? 'online' : ''}>{selected.member.attendance && !selected.member.attendance.checkOutAt ? 'Đang làm việc' : 'Chưa check-in'}</em></aside>}{!office.loading && !office.data.departments.length && <div className="office-empty-overlay"><Empty description="Chưa có phòng ban hoạt động để hiển thị"/></div>}<div className="office-three-hint">Kéo để xoay văn phòng · Cuộn để zoom · Bấm nhân sự để xem trạng thái</div></div>
-      <div className="office-legend"><span><i className="legend-working"/> Đang làm việc</span><span><i className="legend-away"/> Chưa check-in</span><span><i className="legend-empty"/> Ghế trống</span><em>Mô hình Three.js · bố cục dựa trên ảnh văn phòng bạn cung cấp.</em></div>
+      <div className="office-topline"><div><span className="office-logo">T</span><div><strong>TRED OFFICE</strong><small>Cập nhật trạng thái làm việc hôm nay</small></div></div><Segmented value={officeView} onChange={(value) => setOfficeView(value as "OFFICE" | "OUTDOOR" | "LIST")} options={[{ value: "OFFICE", label: "Văn phòng" }, { value: "OUTDOOR", label: "Ngoài trời" }, { value: "LIST", label: "Danh sách" }]}/></div>
+      <div className="office-kpis"><button onClick={() => changePresence("WORKING")}><span className="office-kpi-dot working"/><small>Đang làm việc</small><strong>{activeCount}</strong></button><button onClick={() => changePresence("EVENT")}><span className="office-kpi-dot event"/><small>Đi sự kiện</small><strong>{eventCount}</strong></button><button onClick={() => { setPresence("ALL"); setOfficeView("OFFICE"); }}><span className="office-kpi-dot total"/><small>Tổng nhân sự</small><strong>{uniqueCount}</strong></button></div>
+      <div className="office-toolbar"><Input allowClear value={officeSearch} onChange={(event) => setOfficeSearch(event.target.value)} placeholder="Tìm tên nhân viên..."/><Select allowClear value={departmentId} onChange={setDepartmentId} placeholder="Tất cả phòng ban" options={departments.map((department) => ({ value: department.id, label: department.name }))}/><Select value={presence} onChange={changePresence} options={[{ value: "ALL", label: "Tất cả trạng thái" }, ...Object.entries(officePresenceLabel).map(([value, label]) => ({ value, label }))]}/></div>
+      {officeView !== "LIST" ? <div className="office-three-wrap">{officeView === "OUTDOOR" ? <Outdoor25DScene events={eventGroups} onSelect={selectMember}/> : <Office25DScene departments={officeDepartments} onSelect={selectMember}/>} {selected && <aside className="office-member-card"><button aria-label="Đóng" onClick={() => setSelected(undefined)}>×</button><span className="office-member-avatar">{initials(selected.member.displayName)}</span><strong>{selected.member.displayName}</strong><small>{selected.member.employeeType.name} · {selected.department.name}</small><Tag color={officePresenceColor[officePresence(selected.member)]}>{officePresenceLabel[officePresence(selected.member)]}</Tag>{selected.member.attendance && <dl><div><dt>Check-in</dt><dd>{dayjs(selected.member.attendance.checkInAt).format("HH:mm")}</dd></div><div><dt>Thời gian</dt><dd>{elapsedWorkTime(selected.member.attendance.checkInAt)}</dd></div></dl>}{selected.member.attendance?.event && <p><strong>{selected.member.attendance.event.name}</strong>{selected.member.attendance.event.location && <small>⌖ {selected.member.attendance.event.location}</small>}</p>}</aside>}<div className="office-three-hint">Bấm nhân vật để xem chi tiết</div></div> : <div className="office-member-grid">{visibleMembers.map(({ member, department }) => <button key={member.id} className="office-member-tile" onClick={() => selectMember(member, department)}><Avatar src={member.avatarUrl}>{initials(member.displayName)}</Avatar><span><strong>{member.displayName}</strong><small>{member.employeeType.name} · {department.name}</small></span><Tag color={officePresenceColor[officePresence(member)]}>{officePresenceLabel[officePresence(member)]}</Tag><time>{member.attendance ? `${dayjs(member.attendance.checkInAt).format("HH:mm")} · ${elapsedWorkTime(member.attendance.checkInAt)}` : "Chưa có lượt làm việc"}</time></button>)}{!office.loading && !visibleMembers.length && <Empty description="Không có nhân viên phù hợp bộ lọc"/>}</div>}
+      <Modal title="Chi tiết nhân sự" open={officeView === "LIST" && Boolean(selected)} onCancel={() => setSelected(undefined)} footer={<Button type="primary" onClick={() => setSelected(undefined)}>Đóng</Button>} destroyOnHidden>{selected && <div className="office-list-detail"><Avatar size={58} src={selected.member.avatarUrl}>{initials(selected.member.displayName)}</Avatar><div><h3>{selected.member.displayName}</h3><p>{selected.member.employeeType.name} · {selected.department.name}</p><Tag color={officePresenceColor[officePresence(selected.member)]}>{officePresenceLabel[officePresence(selected.member)]}</Tag></div>{selected.member.attendance && <dl><div><dt>Giờ check-in</dt><dd>{dayjs(selected.member.attendance.checkInAt).format("HH:mm")}</dd></div><div><dt>Thời gian làm việc</dt><dd>{elapsedWorkTime(selected.member.attendance.checkInAt)}</dd></div>{selected.member.attendance.event && <div><dt>Sự kiện</dt><dd>{selected.member.attendance.event.name}</dd></div>}</dl>}</div>}</Modal>
+      <div className="office-legend"><span><i className="legend-working"/> Đang làm việc</span><span><i className="legend-event"/> Đi sự kiện</span><span><i className="legend-away"/> Chưa check-in</span><span><i className="legend-empty"/> Ghế trống</span><em>Mỗi nhân viên chỉ hiển thị tại một phòng ban chính.</em></div>
     </Card>}
   </>;
 }
@@ -739,6 +776,7 @@ export function EmployeesPage() {
   const [form] = Form.useForm();
   const [typeForm] = Form.useForm();
   const [departmentForm] = Form.useForm();
+  const selectedDepartmentIds = Form.useWatch("departmentIds", form) || [];
   const data = useData<Row[]>(
     `/employees${query({ page, pageSize, search })}`,
     [],
@@ -750,7 +788,7 @@ export function EmployeesPage() {
   const show = (r?: Row) => {
     setEditing(r || null);
     form.resetFields();
-    if (r) form.setFieldsValue({ ...r, phone: r.user?.phone, departmentIds: r.departments?.map((item: Row) => item.department.id) });
+    if (r) form.setFieldsValue({ ...r, phone: r.user?.phone, departmentIds: r.departments?.map((item: Row) => item.department.id), primaryDepartmentId: r.primaryDepartmentId });
     setOpen(true);
   };
   const columns = [
@@ -891,7 +929,7 @@ export function EmployeesPage() {
             </>
           )}
           <Tabs items={[
-            { key: "employment", label: "Chức vụ & phòng ban", children: <><Form.Item label="Tên hiển thị" name="displayName" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="Loại nhân sự" name="employeeTypeId" rules={[{ required: true }]}><Select placeholder="Chọn loại nhân sự" options={types.data.filter((t) => t.isActive).map((t) => ({ value: t.id, label: t.name }))} /></Form.Item><Form.Item label="Phòng ban" name="departmentIds"><Select mode="multiple" placeholder="Chọn các phòng ban" options={departments.data.filter((d) => d.isActive).map((d) => ({ value: d.id, label: d.name }))} /></Form.Item></> },
+            { key: "employment", label: "Chức vụ & phòng ban", children: <><Form.Item label="Tên hiển thị" name="displayName" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="Loại nhân sự" name="employeeTypeId" rules={[{ required: true }]}><Select placeholder="Chọn loại nhân sự" options={types.data.filter((t) => t.isActive).map((t) => ({ value: t.id, label: t.name }))} /></Form.Item><Form.Item label="Phòng ban" name="departmentIds"><Select mode="multiple" placeholder="Chọn các phòng ban" options={departments.data.filter((d) => d.isActive).map((d) => ({ value: d.id, label: d.name }))} onChange={(ids) => { const primaryId = form.getFieldValue("primaryDepartmentId"); if (primaryId && !ids.includes(primaryId)) form.setFieldValue("primaryDepartmentId", undefined); }}/></Form.Item><Form.Item label="Phòng ban hiển thị chính" name="primaryDepartmentId" tooltip="Nhân viên sẽ xuất hiện tại phòng này trong Văn phòng ảo"><Select allowClear placeholder="Chọn phòng hiển thị" options={departments.data.filter((department) => department.isActive && selectedDepartmentIds.includes(department.id)).map((department) => ({ value: department.id, label: department.name }))}/></Form.Item></> },
             ...(editing ? [{ key: "personal", label: "Thông tin cá nhân", children: <><p className="modal-description">Những thông tin còn trống sẽ được nhân sự tự cập nhật trên ứng dụng cá nhân.</p><Form.Item label="Số điện thoại" name="phone"><Input type="tel" autoComplete="tel" /></Form.Item><Form.Item label="CCCD" name="citizenId"><Input /></Form.Item><Form.Item label="Ngân hàng" name="bankName"><Input /></Form.Item><Form.Item label="Số tài khoản" name="bankAccountNumber"><Input inputMode="numeric" /></Form.Item></> }] : []),
           ]} />
         </Form>
@@ -945,37 +983,113 @@ export function EmployeesPage() {
   );
 }
 
-export function ServicesPage() {
-  const [active, setActive] = useState("photo");
-  const location = useLocation();
-  const navigate = useNavigate();
-  const view = location.pathname.endsWith("/history") ? "history" : "manage";
-  const [checked, setChecked] = useState<Record<string, boolean>>({ camera: true, batteries: true, uniform: false, greeting: true });
-  const services = [
-    { id: "photo", name: "Chụp ảnh", icon: <CameraOutlined />, tone: "photo", count: 3, description: "Ghi lại khoảnh khắc, ảnh sự kiện và chân dung." },
-    { id: "video", name: "Quay video", icon: <VideoCameraOutlined />, tone: "video", count: 2, description: "Quay phim, nội dung recap và phỏng vấn." },
-    { id: "pgiff", name: "P-Giff", icon: <CheckSquareOutlined />, tone: "pgiff", count: 2, description: "Tương tác khách mời, hoạt náo và tạo không khí." },
+type ServiceImage = { id: string; fileName?: string; mimeType: string; isThumbnail: boolean; createdAt: string };
+type ServiceHistory = { id: string; content: string; createdAt: string; createdBy: { id: string; fullName: string } };
+type ServiceMachineUsage = { allocatedRevenue: number; laborCost: number; transportCost: number; consumableCost: number; repairCost: number; outsourcedCost: number; otherCost: number; usageMinutes: number; createdAt: string; order: { performedAt: string; event?: { id: string; code?: string; name: string } } };
+type ServiceMachine = { id: string; code: string; name: string; status: "READY" | "IN_USE" | "MAINTENANCE" | "RETIRED"; purchaseCost: number; startedAt?: string; note?: string; equipment?: { id: number; name: string; qrCode: string }; usageCount: number; revenue: number; cost: number; profit: number; usageMinutes: number; recentUsages: ServiceMachineUsage[] };
+type ServiceFinance = { usageCount: number; revenue: number; cost: number; profit: number; usageMinutes: number };
+type ServiceItem = { id: number; code: string; name: string; note?: string; purchasePrice: number; createdAt: string; updatedAt: string; catalogGroup: { id: string; code: string; shortName?: string; name: string }; images: ServiceImage[]; machines: ServiceMachine[]; finance: ServiceFinance; _count: { images: number; history: number } };
+type ServiceDetail = ServiceItem & { history: ServiceHistory[] };
+const vnd = (value: number) => `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
+
+function VndInput({ value, onChange, disabled }: { value?: number; onChange?: (value: number) => void; disabled?: boolean }) {
+  return <Input disabled={disabled} inputMode="numeric" value={value == null ? "" : new Intl.NumberFormat("vi-VN").format(value)} suffix="₫" onChange={(event) => { const digits = event.target.value.replace(/\D/g, ""); onChange?.(digits ? Math.min(Number(digits), 2_000_000_000) : 0); }}/>
+}
+
+function ServiceThumbnail({ serviceId, image }: { serviceId: number; image?: ServiceImage }) {
+  const [source, setSource] = useState<string | null>(null);
+  const [loading, setLoading] = useState(Boolean(image));
+  useEffect(() => { if (!image) { setSource(null); setLoading(false); return; } let active = true; let objectUrl = ""; setLoading(true); void request<Blob>(`/service-items/${serviceId}/images/${image.id}`, { raw: true }).then((response) => { if (!active) return; objectUrl = URL.createObjectURL(response.data); setSource(objectUrl); }).catch(() => setSource(null)).finally(() => { if (active) setLoading(false); }); return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); }; }, [serviceId, image]);
+  return <div className="service-thumbnail">{source ? <img src={source} alt={image?.fileName || "Thumbnail dịch vụ"}/> : loading ? <Spin size="small"/> : <span className="no-camera-icon" title="Chưa có ảnh"><CameraOutlined/></span>}</div>;
+}
+
+function ServiceImageCard({ serviceId, image, canDelete, onDelete, onThumbnail }: { serviceId: number; image: ServiceImage; canDelete: boolean; onDelete: () => void; onThumbnail: () => void }) {
+  const [source, setSource] = useState("");
+  useEffect(() => { let active = true; let objectUrl = ""; void request<Blob>(`/service-items/${serviceId}/images/${image.id}`, { raw: true }).then((response) => { if (!active) return; objectUrl = URL.createObjectURL(response.data); setSource(objectUrl); }).catch(() => setSource("")); return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); }; }, [serviceId, image.id]);
+  return <figure className={`service-image-card ${image.isThumbnail ? "thumbnail-selected" : ""}`}>{source ? <img src={source} alt={image.fileName || "Ảnh dịch vụ"}/> : <div><FileImageOutlined/></div>}<figcaption><span><strong>{image.fileName || "Ảnh dịch vụ"}</strong><small>Tải lên: {date(image.createdAt)}</small></span>{canDelete && <Space size={2}>{image.isThumbnail ? <Tag color="success">Thumbnail</Tag> : <Button type="link" size="small" onClick={onThumbnail}>Đặt thumbnail</Button>}<Popconfirm title="Xóa ảnh này?" okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={onDelete}><Button type="text" danger icon={<DeleteOutlined/>}/></Popconfirm></Space>}</figcaption></figure>;
+}
+
+const machineStatusLabel: Record<ServiceMachine["status"], string> = { READY: "Sẵn sàng", IN_USE: "Đang sử dụng", MAINTENANCE: "Bảo trì", RETIRED: "Ngừng sử dụng" };
+const machineStatusColor: Record<ServiceMachine["status"], string> = { READY: "success", IN_USE: "processing", MAINTENANCE: "warning", RETIRED: "default" };
+
+function ServiceFinanceSection({ service, onChanged }: { service: ServiceDetail; onChanged: () => Promise<void> }) {
+  const [machineOpen, setMachineOpen] = useState(false);
+  const [editingMachine, setEditingMachine] = useState<ServiceMachine | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [machineForm] = Form.useForm();
+  const [usageForm] = Form.useForm();
+  const { message } = App.useApp();
+  const role = getSession()?.user.role;
+  const equipment = useData<Row[]>("/equipment-items?page=1&pageSize=100", []);
+  const events = useData<Row[]>("/events?page=1&pageSize=100", []);
+  const openCreateMachine = () => { setEditingMachine(null); machineForm.resetFields(); machineForm.setFieldsValue({ purchaseCost: 0, status: "READY" }); setMachineOpen(true); };
+  const openEditMachine = (machine: ServiceMachine) => { setEditingMachine(machine); machineForm.setFieldsValue({ name: machine.name, equipmentId: machine.equipment?.id, purchaseCost: machine.purchaseCost, startedAt: machine.startedAt ? dayjs(machine.startedAt) : null, status: machine.status, note: machine.note }); setMachineOpen(true); };
+  const submitMachine = async (values: Row) => { setSaving(true); try { const body = { ...values, ...(editingMachine ? { equipmentId: values.equipmentId ?? null, startedAt: values.startedAt?.format("YYYY-MM-DD") ?? null } : { startedAt: values.startedAt?.format("YYYY-MM-DD") }) }; await request(`/service-items/${service.id}/machines${editingMachine ? `/${editingMachine.id}` : ""}`, { method: editingMachine ? "PATCH" : "POST", body }); message.success(editingMachine ? "Đã cập nhật máy dịch vụ" : "Đã thêm máy dịch vụ"); setMachineOpen(false); setEditingMachine(null); machineForm.resetFields(); await onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : editingMachine ? "Không thể cập nhật máy" : "Không thể thêm máy"); } finally { setSaving(false); } };
+  const deleteMachine = async (machine: ServiceMachine) => { try { await request(`/service-items/${service.id}/machines/${machine.id}`, { method: "DELETE" }); message.success("Đã xoá máy dịch vụ"); await onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể xoá máy"); } };
+  const submitUsage = async (values: Row) => { setSaving(true); try { await request(`/service-items/${service.id}/usages`, { method: "POST", body: { ...values, performedAt: values.performedAt.toISOString() } }); message.success("Đã ghi nhận doanh thu và chi phí"); setUsageOpen(false); usageForm.resetFields(); await onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể ghi nhận lượt sử dụng"); } finally { setSaving(false); } };
+  const columns = [
+    { title: "MÁY", dataIndex: "name", render: (value: string, row: ServiceMachine) => <div><strong>{value}</strong><div className="subline">{row.code}</div></div> },
+    { title: "TRẠNG THÁI", dataIndex: "status", width: 125, render: (value: ServiceMachine["status"]) => <Tag color={machineStatusColor[value]}>{machineStatusLabel[value]}</Tag> },
+    { title: "LƯỢT DÙNG", dataIndex: "usageCount", width: 95, align: "right" as const },
+    { title: "DOANH THU", dataIndex: "revenue", width: 135, align: "right" as const, render: vnd },
+    { title: "CHI PHÍ", dataIndex: "cost", width: 125, align: "right" as const, render: vnd },
+    { title: "LỢI NHUẬN", dataIndex: "profit", width: 140, align: "right" as const, render: (value: number) => <strong className={value >= 0 ? "profit-positive" : "profit-negative"}>{vnd(value)}</strong> },
+    ...(role === "ADMIN" ? [{ title: "THAO TÁC", key: "actions", width: 100, align: "center" as const, render: (_: unknown, machine: ServiceMachine) => <Space size={0}><Tooltip title="Sửa máy"><Button type="text" icon={<EditOutlined/>} onClick={() => openEditMachine(machine)}/></Tooltip><Popconfirm title={`Xoá ${machine.name}?`} description={machine.usageCount ? `Máy có ${machine.usageCount} lượt dùng. Dữ liệu doanh thu và chi phí liên quan cũng sẽ bị xoá.` : "Máy sẽ bị xoá khỏi dịch vụ."} okText="Xoá máy" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={() => deleteMachine(machine)}><Tooltip title="Xoá máy"><Button type="text" danger icon={<DeleteOutlined/>}/></Tooltip></Popconfirm></Space> }] : []),
   ];
-  const selected = services.find((service) => service.id === active)!;
-  const Checklist = ({ title, items }: { title: string; items: Array<[string, string]> }) => <section className="service-checklist"><h3>{title}</h3>{items.map(([id, label]) => <label key={id}><Checkbox checked={!!checked[id]} onChange={(event) => setChecked((current) => ({ ...current, [id]: event.target.checked }))}>{label}</Checkbox></label>)}</section>;
+  return <section className="service-detail-section service-finance-section"><div className="service-detail-heading"><div><h3>Máy & hiệu quả tài chính</h3><p>Theo dõi lượt sử dụng, doanh thu, chi phí trực tiếp và lợi nhuận của từng máy.</p></div><Space>{role === "ADMIN" && <Button onClick={openCreateMachine}>Thêm máy</Button>}{(role === "ADMIN" || role === "MANAGER") && service.machines.length > 0 && <Button type="primary" onClick={() => { usageForm.setFieldsValue({ performedAt: dayjs(), revenue: service.purchasePrice, usageMinutes: 240 }); setUsageOpen(true); }}>Ghi nhận sử dụng</Button>}</Space></div><div className="finance-summary"><article><span>Tổng lượt sử dụng</span><strong>{service.finance.usageCount}</strong></article><article><span>Doanh thu</span><strong>{vnd(service.finance.revenue)}</strong></article><article><span>Chi phí trực tiếp</span><strong>{vnd(service.finance.cost)}</strong></article><article className="profit-card"><span>Lợi nhuận</span><strong>{vnd(service.finance.profit)}</strong></article></div><Table size="small" rowKey="id" columns={columns} dataSource={service.machines} pagination={false} scroll={{ x: 920 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa khai báo máy cho dịch vụ"/> }}/><Modal title={editingMachine ? `Sửa máy ${editingMachine.code}` : "Thêm máy cho dịch vụ"} open={machineOpen} onCancel={() => { setMachineOpen(false); setEditingMachine(null); machineForm.resetFields(); }} onOk={() => machineForm.submit()} confirmLoading={saving} okText={editingMachine ? "Lưu thay đổi" : "Thêm máy"} cancelText="Hủy" destroyOnHidden><Form form={machineForm} layout="vertical" onFinish={submitMachine}><Form.Item name="name" label="Tên máy" rules={[{ required: true }]}><Input placeholder="Ví dụ: Iconic 03"/></Form.Item><Form.Item name="equipmentId" label="Liên kết thiết bị trong kho"><Select allowClear loading={equipment.loading} showSearch optionFilterProp="label" options={equipment.data.map((item) => ({ value: item.id, label: `${item.name}${item.model ? ` — ${item.model}` : ""}` }))}/></Form.Item><div className="form-pair"><Form.Item name="purchaseCost" label="Giá mua máy"><VndInput/></Form.Item><Form.Item name="startedAt" label="Ngày bắt đầu sử dụng"><DatePicker style={{ width: "100%" }} format="DD/MM/YYYY"/></Form.Item></div><Form.Item name="status" label="Trạng thái"><Select options={Object.entries(machineStatusLabel).map(([value, label]) => ({ value, label }))}/></Form.Item><Form.Item name="note" label="Ghi chú"><Input.TextArea rows={2}/></Form.Item></Form></Modal><Modal title="Ghi nhận máy đã thực hiện dịch vụ" open={usageOpen} onCancel={() => setUsageOpen(false)} onOk={() => usageForm.submit()} confirmLoading={saving} okText="Lưu ghi nhận" cancelText="Hủy" width={720} destroyOnHidden><Form form={usageForm} layout="vertical" onFinish={submitUsage}><div className="form-pair"><Form.Item name="machineId" label="Máy thực hiện" rules={[{ required: true }]}><Select options={service.machines.map((machine) => ({ value: machine.id, label: `${machine.code} — ${machine.name}` }))}/></Form.Item><Form.Item name="eventId" label="Sự kiện (không bắt buộc)"><Select allowClear loading={events.loading} showSearch optionFilterProp="label" options={events.data.map((event) => ({ value: event.id, label: `${event.code || "Sự kiện"} — ${event.name}` }))}/></Form.Item></div><div className="form-pair"><Form.Item name="performedAt" label="Thời gian thực hiện" rules={[{ required: true }]}><DatePicker showTime style={{ width: "100%" }} format="DD/MM/YYYY HH:mm"/></Form.Item><Form.Item name="usageMinutes" label="Thời lượng sử dụng (phút)"><InputNumber min={0} style={{ width: "100%" }}/></Form.Item></div><Form.Item name="revenue" label="Doanh thu phân bổ cho máy" rules={[{ required: true }]}><VndInput/></Form.Item><div className="finance-cost-grid"><Form.Item name="laborCost" label="Nhân sự"><VndInput/></Form.Item><Form.Item name="transportCost" label="Vận chuyển"><VndInput/></Form.Item><Form.Item name="consumableCost" label="Vật tư tiêu hao"><VndInput/></Form.Item><Form.Item name="repairCost" label="Sửa chữa"><VndInput/></Form.Item><Form.Item name="outsourcedCost" label="Thuê ngoài"><VndInput/></Form.Item><Form.Item name="otherCost" label="Chi phí khác"><VndInput/></Form.Item></div><Form.Item name="note" label="Ghi chú"><Input.TextArea rows={2}/></Form.Item></Form></Modal></section>;
+}
+
+function ServiceDetailModal({ id, groups, onClose, onChanged }: { id: number; groups: CatalogGroup[]; onClose: () => void; onChanged: () => void }) {
+  const detail = useData<ServiceDetail | null>(`/service-items/${id}`, null);
+  const [form] = Form.useForm();
+  const [history, setHistory] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { message } = App.useApp();
+  const isAdmin = getSession()?.user.role === "ADMIN";
+  useEffect(() => { if (detail.data) form.setFieldsValue({ name: detail.data.name, catalogGroupId: detail.data.catalogGroup.id, note: detail.data.note, purchasePrice: detail.data.purchasePrice }); }, [detail.data, form]);
+  const upload = async (file: File) => { try { await request(`/service-items/${id}/images`, { method: "POST", body: { fileName: file.name, dataUrl: await fileAsDataUrl(file) } }); message.success("Đã tải ảnh và lưu thời gian upload"); await detail.load(); onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể tải ảnh"); } };
+  return <Modal width={1080} title={detail.data ? `${detail.data.code} — ${detail.data.name}` : "Chi tiết dịch vụ"} open onCancel={onClose} footer={null} destroyOnHidden><ErrorNotice error={detail.error}/>{detail.loading || !detail.data ? <div className="modal-loading"><Spin/></div> : <div className="service-detail"><Form form={form} layout="vertical" disabled={!isAdmin} onFinish={async (values) => { setSaving(true); try { await request(`/service-items/${id}`, { method: "PATCH", body: values }); message.success("Đã cập nhật dịch vụ"); await detail.load(); onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể cập nhật"); } finally { setSaving(false); } }}><div className="form-pair"><Form.Item name="name" label="Tên dịch vụ" rules={[{ required: true }]}><Input/></Form.Item><Form.Item name="catalogGroupId" label="Loại / nhóm dịch vụ" rules={[{ required: true }]}><Select options={groups.map((group) => ({ value: group.id, label: `${group.code} — ${group.name}` }))}/></Form.Item></div><div className="form-pair"><Form.Item name="purchasePrice" label="Giá nhập (VND)" rules={[{ required: true }]}><VndInput/></Form.Item><Form.Item label="Ngày cập nhật"><Input value={date(detail.data.updatedAt)} disabled/></Form.Item></div><Form.Item name="note" label="Ghi chú"><Input.TextArea rows={3}/></Form.Item>{isAdmin && <Button type="primary" htmlType="submit" icon={<SaveOutlined/>} loading={saving}>Lưu thay đổi</Button>}</Form><ServiceFinanceSection service={detail.data} onChanged={async () => { await detail.load(); onChanged(); }}/><section className="service-detail-section"><div className="service-detail-heading"><div><h3>Ảnh dịch vụ</h3><p>Mỗi ảnh hiển thị ngày và giờ upload. Chọn một ảnh để làm thumbnail ngoài danh sách.</p></div><Upload accept="image/jpeg,image/png,image/webp" showUploadList={false} beforeUpload={(file) => { if (file.size > 20_000_000) { message.error("Ảnh không được vượt quá 20 MB"); return Upload.LIST_IGNORE; } void upload(file); return false; }}><Button icon={<UploadOutlined/>}>Tải ảnh lên</Button></Upload></div>{detail.data.images.length ? <div className="service-image-grid">{detail.data.images.map((image) => <ServiceImageCard key={image.id} serviceId={id} image={image} canDelete={isAdmin} onThumbnail={async () => { await request(`/service-items/${id}/images/${image.id}/thumbnail`, { method: "PATCH" }); await detail.load(); onChanged(); message.success("Đã chọn ảnh thumbnail"); }} onDelete={async () => { await request(`/service-items/${id}/images/${image.id}`, { method: "DELETE" }); await detail.load(); onChanged(); }}/>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có ảnh dịch vụ"/>}</section><section className="service-detail-section"><div className="service-detail-heading"><div><h3>Lịch sử & tình trạng</h3><p>Nhân viên ghi nhận hư hỏng khi đi show hoặc trong quá trình vận chuyển.</p></div></div><div className="service-history-form"><Input.TextArea value={history} onChange={(event) => setHistory(event.target.value)} rows={2} maxLength={2000} placeholder="Ví dụ: Đi show bị hư chân đế, trầy khi vận chuyển..."/><Button type="primary" disabled={!history.trim()} onClick={async () => { try { await request(`/service-items/${id}/history`, { method: "POST", body: { content: history } }); setHistory(""); await detail.load(); onChanged(); message.success("Đã thêm lịch sử"); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể thêm lịch sử"); } }}>Thêm lịch sử</Button></div>{detail.data.history.length ? <div className="service-history-list">{detail.data.history.map((entry) => <article key={entry.id}><span className="history-dot"/><div><strong>{entry.createdBy.fullName}</strong><time>{date(entry.createdAt)}</time><p>{entry.content}</p></div></article>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có lịch sử"/>}</section></div>}</Modal>;
+}
+
+export function ServicesPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState("");
+  const [groupId, setGroupId] = useState<string>();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [detailId, setDetailId] = useState<number>();
+  const [files, setFiles] = useState<File[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [form] = Form.useForm();
+  const { message, modal } = App.useApp();
+  const isAdmin = getSession()?.user.role === "ADMIN";
+  const groups = useData<CatalogGroup[]>("/catalog/groups/service", []);
+  const services = useData<ServiceItem[]>(`/service-items${query({ page, pageSize, search, groupId })}`, []);
+  const removeSelected = () => modal.confirm({ title: selectedIds.length === 1 ? "Xóa dịch vụ đã chọn?" : `Xóa ${selectedIds.length} dịch vụ đã chọn?`, content: "Dữ liệu máy và hiệu quả tài chính của dịch vụ sẽ bị xóa. Thiết bị gốc trong kho vẫn được giữ nguyên.", okText: "Xóa dịch vụ", cancelText: "Hủy", okButtonProps: { danger: true }, onOk: async () => { setDeleting(true); try { const result = await request<{ deleted: number }>("/service-items/bulk", { method: "DELETE", body: { ids: selectedIds } }); message.success(`Đã xóa ${result.data.deleted} dịch vụ, thiết bị trong kho không bị ảnh hưởng`); setSelectedIds([]); await services.load(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể xóa dịch vụ"); throw error; } finally { setDeleting(false); } } });
+  const columns = [
+    { title: "ẢNH", dataIndex: "images", width: 110, render: (images: ServiceImage[], row: ServiceItem) => <ServiceThumbnail serviceId={row.id} image={images[0]}/> },
+    { title: "MÃ DỊCH VỤ", dataIndex: "code", width: 130, render: (value: string) => <Tag>{value}</Tag> },
+    { title: "TÊN DỊCH VỤ", dataIndex: "name", width: 240, render: (value: string, row: ServiceItem) => <button className="service-name-link" onClick={() => setDetailId(row.id)}>{value}</button> },
+    { title: "LOẠI / NHÓM", dataIndex: "catalogGroup", width: 180, render: (group: ServiceItem["catalogGroup"]) => <div><strong>{group.name}</strong><div className="subline">{group.code}</div></div> },
+    { title: "MÁY", dataIndex: "machines", width: 90, align: "right" as const, render: (machines: ServiceMachine[]) => machines.length },
+    { title: "LƯỢT DÙNG", dataIndex: "finance", width: 110, align: "right" as const, render: (finance: ServiceFinance) => finance.usageCount },
+    { title: "DOANH THU", dataIndex: "finance", width: 150, align: "right" as const, render: (finance: ServiceFinance) => vnd(finance.revenue) },
+    { title: "LỢI NHUẬN", dataIndex: "finance", width: 150, align: "right" as const, render: (finance: ServiceFinance) => <strong className={finance.profit >= 0 ? "profit-positive" : "profit-negative"}>{vnd(finance.profit)}</strong> },
+    { title: "GHI CHÚ", dataIndex: "note", width: 300, render: (value?: string) => value || "—" },
+    { title: "GIÁ NHẬP", dataIndex: "purchasePrice", width: 150, render: vnd },
+    { title: "NGÀY CẬP NHẬT", dataIndex: "updatedAt", width: 165, render: date },
+    { title: "", key: "actions", fixed: "right" as const, width: 110, render: (_: unknown, row: ServiceItem) => <Button size="small" onClick={() => setDetailId(row.id)}>Chi tiết</Button> },
+  ];
   return <>
-    <Heading eyebrow="THIẾT BỊ & VẬT TƯ / DỊCH VỤ" title="Danh sách dịch vụ" subtitle="Quản lý dịch vụ, đội ngũ và lịch sử thực hiện." extra={<Button type="primary" icon={<PlusOutlined />}>Tạo dịch vụ</Button>} />
-    <Segmented className="service-segmented" value={view} onChange={(value) => navigate(value === "history" ? "/services/history" : "/services")} options={[{ value: "manage", label: "Quản lý dịch vụ" }, { value: "history", label: "Lịch sử" }]} />
-    {view === "history" ? <Panel title="Lịch sử dịch vụ" description="Các dịch vụ đã thực hiện và nội dung được bàn giao."><GridTable data={[{ id: "history-1", name: "Chụp ảnh · Workshop Branding", date: "24/10/2026 18:00", crew: "3 nhân sự", result: "18 ảnh đã tải lên", state: "COMPLETED" }, { id: "history-2", name: "Quay video · Event nội bộ", date: "20/10/2026 09:30", crew: "2 nhân sự", result: "Đang chờ bàn giao", state: "IN_PROGRESS" }, { id: "history-3", name: "P-Giff · Kích hoạt thương hiệu", date: "17/10/2026 14:00", crew: "2 nhân sự", result: "Checklist hoàn tất", state: "COMPLETED" }]} loading={false} columns={[{ title: "DỊCH VỤ", dataIndex: "name" }, { title: "THỜI GIAN", dataIndex: "date" }, { title: "NHÂN SỰ", dataIndex: "crew" }, { title: "KẾT QUẢ", dataIndex: "result" }, { title: "TRẠNG THÁI", dataIndex: "state", render: status }, { title: "", render: () => <Button size="small">Xem chi tiết</Button> }]} /></Panel> : <>
-    <div className="service-types">{services.map((service) => <button key={service.id} className={`service-type ${service.tone} ${active === service.id ? "selected" : ""}`} onClick={() => setActive(service.id)}><span>{service.icon}</span><strong>{service.name}</strong><small>{service.count} nhân sự / dịch vụ</small></button>)}</div>
-    <div className="service-layout">
-      <Panel title={selected.name} description={selected.description} extra={<Tag color="processing">MOCKUP</Tag>}>
-        <div className="service-summary"><div><span>NHÂN SỰ CẦN CÓ</span><strong>{selected.count}</strong><small>có thể gán nhiều nhân sự theo ca</small></div><div><span>THÔNG TIN DỊCH VỤ</span><strong>Chưa thiết lập</strong><small>Thêm mô tả, thời lượng và yêu cầu khi sẵn sàng.</small></div></div>
-        <div className="service-photo"><div><CameraOutlined /><strong>Ảnh dịch vụ</strong><small>Ảnh mẫu, ảnh tham khảo hoặc ảnh sau khi hoàn thành.</small></div><Button icon={<UploadOutlined />}>Tải ảnh lên</Button></div>
-        <div className="service-assignees"><div><h3>Nhân sự được gán</h3><p>Nhân sự chụp ảnh có thể tải ảnh sau khi được gán vào dịch vụ.</p></div><div className="assignee-chip"><Initial name="Hung Thai"/><span><strong>Hưng Thái</strong><small>Nhiếp ảnh · Có quyền tải ảnh</small></span></div><Button icon={<PlusOutlined />}>Gán nhân sự</Button></div>
-      </Panel>
-      <Panel title="Checklist thực hiện" description="Mẫu checklist — sẽ liên kết dữ liệu dịch vụ sau.">
-        <Checklist title="Thiết bị" items={[["camera", "Máy ảnh / máy quay đã kiểm tra"], ["batteries", "Pin, thẻ nhớ và sạc dự phòng"], ["lighting", "Đèn và phụ kiện cần thiết"]]} />
-        <Checklist title="Trang phục" items={[["uniform", "Đồng phục sạch, đúng nhận diện"], ["badge", "Thẻ nhân sự / bảng tên"]]} />
-        <Checklist title="Giao tiếp" items={[["greeting", "Chào khách và xác nhận nhu cầu"], ["brief", "Nắm rõ brief, timeline và đầu mối"], ["handover", "Bàn giao ảnh / nội dung đúng quy trình"]]} />
-      </Panel>
-    </div>
-    </>}
+    <Heading eyebrow="THIẾT BỊ & VẬT TƯ / DỊCH VỤ" title="Danh sách dịch vụ" subtitle="Quản lý thông tin, hình ảnh, giá nhập và lịch sử dịch vụ." extra={isAdmin ? <Button type="primary" icon={<PlusOutlined/>} onClick={() => { form.resetFields(); setFiles([]); setCreateOpen(true); }}>Tạo dịch vụ</Button> : undefined}/>
+    <ErrorNotice error={services.error || groups.error}/><Panel title="Dịch vụ" description={`${services.meta?.total ?? 0} dịch vụ trong hệ thống`}><div className="equipment-filters"><Input.Search allowClear placeholder="Tìm mã, tên hoặc ghi chú..." onSearch={(value) => { setSearch(value); setPage(1); setSelectedIds([]); }} style={{ width: 320 }}/><Select allowClear placeholder="Lọc theo nhóm dịch vụ" value={groupId} onChange={(value) => { setGroupId(value); setPage(1); setSelectedIds([]); }} style={{ width: 250 }} options={groups.data.map((group) => ({ value: group.id, label: `${group.code} — ${group.name}` }))}/><Button icon={<ReloadOutlined/>} loading={services.loading} onClick={() => void services.load()}>Làm mới</Button>{isAdmin && <Button danger icon={<DeleteOutlined/>} disabled={!selectedIds.length} loading={deleting} onClick={removeSelected}>Xóa{selectedIds.length ? ` (${selectedIds.length})` : ""}</Button>}</div><Table rowKey="id" loading={services.loading} columns={columns} dataSource={services.data} rowSelection={isAdmin ? { selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys.map(Number)), getCheckboxProps: () => ({ disabled: deleting }) } : undefined} scroll={{ x: 1800 }} pagination={{ current: services.meta?.page, pageSize: services.meta?.pageSize || pageSize, total: services.meta?.total, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true, onChange: (nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); setSelectedIds([]); } }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có dịch vụ"/> }}/></Panel>
+    <Modal title="Tạo dịch vụ" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => form.submit()} okText="Tạo dịch vụ" cancelText="Hủy" confirmLoading={creating} destroyOnHidden><Form form={form} layout="vertical" initialValues={{ purchasePrice: 0 }} onFinish={async (values) => { setCreating(true); try { const created = await request<ServiceDetail>("/service-items", { method: "POST", body: values }); for (const file of files) await request(`/service-items/${created.data.id}/images`, { method: "POST", body: { fileName: file.name, dataUrl: await fileAsDataUrl(file) } }); message.success(`Đã tạo ${created.data.code}`); setCreateOpen(false); await services.load(); setDetailId(created.data.id); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể tạo dịch vụ"); } finally { setCreating(false); } }}><Form.Item name="name" label="Tên dịch vụ" rules={[{ required: true, message: "Vui lòng nhập tên dịch vụ" }]}><Input placeholder="Ví dụ: Chụp ảnh sự kiện cơ bản"/></Form.Item><Form.Item name="catalogGroupId" label="Loại / nhóm dịch vụ" rules={[{ required: true, message: "Vui lòng chọn nhóm dịch vụ" }]}><Select options={groups.data.map((group) => ({ value: group.id, label: `${group.code} — ${group.name}` }))}/></Form.Item><Form.Item name="purchasePrice" label="Giá nhập (VND)" rules={[{ required: true }]}><VndInput/></Form.Item><Form.Item name="note" label="Ghi chú"><Input.TextArea rows={3} maxLength={2000}/></Form.Item><Form.Item label="Ảnh dịch vụ"><Upload multiple accept="image/jpeg,image/png,image/webp" beforeUpload={(file) => { if (file.size > 20_000_000) { message.error(`${file.name} vượt quá 20 MB`); return Upload.LIST_IGNORE; } setFiles((current) => [...current, file]); return false; }} onRemove={(file) => setFiles((current) => current.filter((item) => item.name !== file.name || item.lastModified !== file.lastModified))}><Button icon={<UploadOutlined/>}>Chọn ảnh</Button></Upload><div className="subline">JPEG, PNG hoặc WebP · tối đa 20 MB/ảnh. Ảnh đầu tiên được chọn làm thumbnail; có thể đổi trong trang chi tiết.</div></Form.Item></Form></Modal>
+    {detailId && (
+      <ServiceDetailModal id={detailId} groups={groups.data} onClose={() => setDetailId(undefined)} onChanged={() => void services.load()}/>
+    )}
   </>;
 }
 
@@ -2007,7 +2121,7 @@ export function SettingsPage() {
 }
 
 type EquipmentImportRow = { name: string; model?: string; group: string; quantity?: number; serialNumber?: string; condition?: string; accessoryNotes?: string; managementStatus?: string; storageLocation?: string; custodian?: string; inventoryDate?: string; normalizedNote?: string };
-type EquipmentItem = Omit<EquipmentImportRow, "group"> & { id: number; qrCode: string; catalogGroup: { id: string; code: string; shortName?: string; name: string }; createdAt: string; updatedAt: string };
+type EquipmentItem = Omit<EquipmentImportRow, "group"> & { id: number; qrCode: string; depreciationMonths?: number; catalogGroup: { id: string; code: string; shortName?: string; name: string }; createdAt: string; updatedAt: string };
 type EquipmentImportResult = { created: number; failed: number; total: number; errors: { row: number; message: string }[] };
 const equipmentHeaders = ["Tên thiết bị", "Loại / Model", "Nhóm thiết bị", "Số lượng", "Mã tài sản / Serial", "Tình trạng", "Phụ kiện/ghi chú", "Trạng thái quản lý", "Vị trí lưu trữ", "Người phụ trách", "Ngày kiểm kê", "Ghi chú chuẩn hóa"];
 const equipmentFields: (keyof EquipmentImportRow)[] = ["name", "model", "group", "quantity", "serialNumber", "condition", "accessoryNotes", "managementStatus", "storageLocation", "custodian", "inventoryDate", "normalizedNote"];
@@ -2163,7 +2277,7 @@ function EquipmentPhotoCard({ equipmentId, photo, onDelete }: { equipmentId: num
   }, [equipmentId, photo.id]);
   return <figure className="equipment-photo-card">
     {source ? <img src={source} alt={photo.fileName || "Ảnh thiết bị"}/> : <div className="equipment-photo-loading"><FileImageOutlined/></div>}
-    <figcaption><span title={photo.fileName}>{photo.fileName || "Ảnh thiết bị"}</span><Popconfirm title="Xóa ảnh này?" okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={onDelete}><Button type="text" danger aria-label="Xóa ảnh" icon={<DeleteOutlined/>}/></Popconfirm></figcaption>
+    <figcaption><span title={photo.fileName}><strong>{photo.fileName || "Ảnh thiết bị"}</strong><small>Tải lên: {date(photo.createdAt)}</small></span><Popconfirm title="Xóa ảnh này?" okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }} onConfirm={onDelete}><Button type="text" danger aria-label="Xóa ảnh" icon={<DeleteOutlined/>}/></Popconfirm></figcaption>
   </figure>;
 }
 
@@ -2218,7 +2332,8 @@ export function EquipmentDetailPage() {
           <div className="form-pair"><Form.Item name="catalogGroupId" label="Nhóm thiết bị" rules={[{ required: true }]}><Select options={groups.data.map((group) => ({ value: group.id, label: `${group.shortName || group.code} — ${group.name}` }))}/></Form.Item><Form.Item name="quantity" label="Số lượng" rules={[{ required: true }]}><InputNumber min={1} max={10000} style={{ width: "100%" }}/></Form.Item></div>
           <div className="form-pair"><Form.Item name="serialNumber" label="Mã tài sản / Serial"><Input maxLength={150}/></Form.Item><Form.Item name="managementStatus" label="Trạng thái quản lý"><Input maxLength={100}/></Form.Item></div>
           <div className="form-pair"><Form.Item name="storageLocation" label="Vị trí lưu trữ"><Input maxLength={200}/></Form.Item><Form.Item name="custodian" label="Người phụ trách"><Input maxLength={150}/></Form.Item></div>
-          <div className="form-pair"><Form.Item name="inventoryDate" label="Ngày kiểm kê"><DatePicker style={{ width: "100%" }} format="DD/MM/YYYY"/></Form.Item><Form.Item name="normalizedNote" label="Ghi chú chuẩn hóa"><Input maxLength={500}/></Form.Item></div>
+          <div className="form-pair"><Form.Item name="inventoryDate" label="Ngày kiểm kê"><DatePicker style={{ width: "100%" }} format="DD/MM/YYYY"/></Form.Item><Form.Item name="depreciationMonths" label="Khấu hao dự kiến (tháng)"><InputNumber min={1} max={240} placeholder="Ví dụ: 36" style={{ width: "100%" }}/></Form.Item></div>
+          <Form.Item name="normalizedNote" label="Ghi chú chuẩn hóa"><Input maxLength={500}/></Form.Item>
           <Form.Item name="condition" label="Tình trạng thiết bị"><Input.TextArea rows={3} maxLength={500} showCount/></Form.Item>
           <Form.Item name="accessoryNotes" label="Phụ kiện / ghi chú"><Input.TextArea rows={3} maxLength={500} showCount/></Form.Item>
         </Form>
