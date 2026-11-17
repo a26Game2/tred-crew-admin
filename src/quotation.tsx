@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Spin, Table, Tag, Typography } from 'antd';
-import { CalendarOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
+import { CalendarOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { getSession, request } from './api';
 import { refreshQuotationNotifications } from './quotation-notifications';
+import { downloadQuotationPdf } from './quotation-pdf';
 
 type PackageRow = { id: string; code: string; label: string; durationMinutes: number | null; price: number; isFeatured: boolean; sortOrder: number; enabled: boolean };
 type Storefront = { slug: string; categoryKey: string; publicName: string; kicker?: string; shortDescription: string; heroTitle?: string; heroAccent?: string; features: string[]; detail?: string; sortOrder: number; pricingConfig: unknown; schemaVersion: number; status: 'DRAFT' | 'PUBLISHED'; publishedAt?: string; updatedAt: string };
 type ServiceConfig = { id: number; code: string; name: string; storefront: Storefront | null; packages: PackageRow[] };
 type QuoteItem = { id: string; label: string; amount: number };
 type QuoteDiscount = { code: string; name: string; type: 'PERCENT' | 'FIXED'; value: number; amount: number };
-type QuoteSnapshot = { serviceId?: number; serviceName?: string; serviceSlug?: string; total?: number | null; subtotal?: number | null; discount?: QuoteDiscount; transport?: number; options?: number; currency?: string; priceStatus?: 'OFFICIAL' | 'REFERENCE' | 'CONTACT_ONLY'; priceMessage?: string; items?: QuoteItem[]; selection?: Record<string, unknown>; region?: { id?: string; name?: string } };
+type QuoteSnapshot = { serviceId?: number; serviceName?: string; serviceSlug?: string; total?: number | null; subtotal?: number | null; taxableAmount?: number | null; vatEnabled?: boolean; vatRate?: number; vatAmount?: number | null; discount?: QuoteDiscount; transport?: number; options?: number; currency?: string; priceStatus?: 'OFFICIAL' | 'REFERENCE' | 'CONTACT_ONLY'; priceMessage?: string; items?: QuoteItem[]; selection?: Record<string, unknown>; region?: { id?: string; name?: string } };
 type QuoteRequest = { id: string; code: string; status: string; customerName: string; phone: string; email?: string; eventDate?: string; eventTime?: string; venue: string; notes?: string; quoteSnapshot: QuoteSnapshot; eventId?: string; createdAt: string };
 type DiscountCodeRow = { id: string; code: string; name: string; type: 'PERCENT' | 'FIXED'; value: number; maxDiscount: number | null; minimumSubtotal: number; startsAt: string | null; endsAt: string | null; usageLimit: number | null; usageCount: number; enabled: boolean; createdAt: string; updatedAt: string };
+type VatSettings = { id: number; vatEnabled: boolean; vatRate: number; updatedAt?: string };
 type OfficialRegionId = 'danang' | 'hcm' | 'hanoi';
 type OtherRegionMode = 'REFERENCE' | 'CONTACT_ONLY';
 type RegionPolicy = { defaultRegionId: OfficialRegionId; otherMode: OtherRegionMode; referenceRegionId: OfficialRegionId; otherMessage: string };
@@ -118,6 +120,47 @@ export function ServicePricingContent({ serviceId, serviceName, onChanged }: { s
   </div>;
 }
 
+export function QuotationVatSettingsPanel() {
+  const { message } = App.useApp();
+  const [form] = Form.useForm<VatSettings>();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string>();
+  const isAdmin = getSession()?.user.role === 'ADMIN';
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const settings = (await request<VatSettings>('/quotation/settings')).data;
+      form.setFieldsValue(settings);
+      setUpdatedAt(settings.updatedAt);
+    } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không tải được cấu hình VAT'); }
+    finally { setLoading(false); }
+  }, [form, message]);
+  useEffect(() => { void load(); }, [load]);
+  const save = async (values: VatSettings) => {
+    setSaving(true);
+    try {
+      const settings = (await request<VatSettings>('/quotation/settings', { method: 'PATCH', body: { vatEnabled: values.vatEnabled, vatRate: values.vatRate } })).data;
+      form.setFieldsValue(settings);
+      setUpdatedAt(settings.updatedAt);
+      message.success('Đã cập nhật VAT cho báo giá mới');
+    } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không thể cập nhật VAT'); }
+    finally { setSaving(false); }
+  };
+  if (loading) return <Card className="vat-settings-card"><Spin/> Đang tải cấu hình VAT...</Card>;
+  return <Card className="vat-settings-card" title="Cấu hình VAT báo giá" extra={updatedAt ? <Typography.Text type="secondary">Cập nhật {dayjs(updatedAt).format('DD/MM/YYYY HH:mm')}</Typography.Text> : null}>
+    <Alert type="info" showIcon message="VAT được tính sau ưu đãi" description="Mỗi yêu cầu sẽ lưu tỷ lệ và số tiền VAT tại thời điểm gửi. Thay đổi tại đây chỉ áp dụng cho báo giá mới."/>
+    <Form form={form} layout="vertical" disabled={!isAdmin} onFinish={save} className="vat-settings-form">
+      <Form.Item name="vatEnabled" valuePropName="checked"><Checkbox>Tính VAT khi tạo báo giá</Checkbox></Form.Item>
+      <Form.Item noStyle shouldUpdate={(before, after) => before.vatEnabled !== after.vatEnabled || before.vatRate !== after.vatRate}>{({ getFieldValue }) => <>
+        <Form.Item name="vatRate" label="Thuế suất VAT" rules={[{ required: true, message: 'Nhập thuế suất VAT' }]}><InputNumber min={0} max={100} precision={0} addonAfter="%" style={{ width: 220 }}/></Form.Item>
+        <div className="vat-preview"><span>Ví dụ với tạm tính 1.000.000 ₫</span><strong>{getFieldValue('vatEnabled') ? `${vnd(1_000_000 * (1 + Number(getFieldValue('vatRate') || 0) / 100))} · VAT ${vnd(1_000_000 * Number(getFieldValue('vatRate') || 0) / 100)}` : `${vnd(1_000_000)} · Không tính VAT`}</strong></div>
+      </>}</Form.Item>
+      {isAdmin && <Button type="primary" htmlType="submit" icon={<SaveOutlined/>} loading={saving}>Lưu cấu hình VAT</Button>}
+    </Form>
+  </Card>;
+}
+
 export function DiscountCodesPanel() {
   const { message } = App.useApp();
   const [rows, setRows] = useState<DiscountCodeRow[]>([]);
@@ -172,11 +215,13 @@ export function DiscountCodesPanel() {
 
 export function QuotationRequestsPanel() {
   const { message } = App.useApp();
+  const reviewRef = useRef<HTMLDivElement>(null);
   const [requests, setRequests] = useState<QuoteRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [requestDetail, setRequestDetail] = useState<QuoteRequest | null>(null);
   const [scheduleRequest, setScheduleRequest] = useState<QuoteRequest | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [scheduleForm] = Form.useForm<{ period: [Dayjs, Dayjs] }>();
   const isAdmin = getSession()?.user.role === 'ADMIN';
   const load = useCallback(async () => { setLoading(true); try { setRequests((await request<QuoteRequest[]>('/quotation/requests?page=1&pageSize=100')).data); refreshQuotationNotifications(); } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không tải được yêu cầu báo giá'); } finally { setLoading(false); } }, [message]);
@@ -199,6 +244,15 @@ export function QuotationRequestsPanel() {
     } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không thể chốt lịch'); }
     finally { setConfirming(false); }
   };
+  const exportPdf = async () => {
+    if (!requestDetail || !reviewRef.current) return;
+    setExportingPdf(true);
+    try {
+      await downloadQuotationPdf(reviewRef.current, requestDetail.code);
+      message.success('Đã tải báo giá PDF');
+    } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không thể tạo file PDF'); }
+    finally { setExportingPdf(false); }
+  };
   const priceTag = (status?: QuoteSnapshot['priceStatus']) => status === 'REFERENCE' ? <Tag color="blue">Giá tham khảo</Tag> : status === 'CONTACT_ONLY' ? <Tag color="orange">Cần xác nhận giá</Tag> : <Tag color="green">Giá chính thức</Tag>;
   const selectionItems = (snapshot: QuoteSnapshot) => {
     const selection = snapshot.selection || {};
@@ -208,15 +262,15 @@ export function QuotationRequestsPanel() {
   const statusSelect = (row: QuoteRequest, mobile = false) => <Select aria-label={`Trạng thái yêu cầu ${row.code}`} value={row.status} disabled={!!row.eventId} className={mobile ? 'quotation-mobile-status' : undefined} style={mobile ? undefined : { width: 175 }} options={quotationStatusOptions.map(option => ({ ...option, disabled: option.value === 'CONFIRMED' && row.status !== 'CONTACTED' && !row.eventId }))} onChange={value => { if (value === 'CONFIRMED' && !row.eventId) openSchedule(row); else void updateStatus(row, value); }}/>;
   return <>
     <Card className="quotation-requests-card" title={`Yêu cầu báo giá (${requests.length})`} extra={<Button icon={<ReloadOutlined/>} onClick={() => void load()}>Làm mới</Button>}>
-      <div className="quotation-desktop-table"><Table rowKey="id" loading={loading} dataSource={requests} tableLayout="fixed" scroll={{ x: 1180 }} columns={[{ title: 'Mã', dataIndex: 'code', width: 90 }, { title: 'Khách hàng', width: 160, render: (_, row) => <><strong>{row.customerName}</strong><br/><Typography.Text type="secondary">{row.phone}</Typography.Text></> }, { title: 'Dịch vụ', width: 120, ellipsis: true, render: (_, row) => row.quoteSnapshot?.serviceName || '—' }, { title: 'Địa điểm', dataIndex: 'venue', width: 250, ellipsis: true }, { title: 'Loại giá', width: 135, render: (_, row) => priceTag(row.quoteSnapshot?.priceStatus) }, { title: 'Tổng dự kiến', width: 150, render: (_, row) => row.quoteSnapshot?.total == null ? <Typography.Text type="warning">Liên hệ báo giá</Typography.Text> : vnd(row.quoteSnapshot.total) }, { title: 'Trạng thái', width: 175, render: (_, row) => statusSelect(row) }, { title: '', fixed: 'right', width: 60, render: (_, row) => <Button type="text" aria-label={`Review yêu cầu ${row.code}`} icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}/> }]}/></div>
+      <div className="quotation-desktop-table"><Table rowKey="id" loading={loading} dataSource={requests} tableLayout="fixed" scroll={{ x: 1180 }} columns={[{ title: 'Mã', dataIndex: 'code', width: 90 }, { title: 'Khách hàng', width: 160, render: (_, row) => <><strong>{row.customerName}</strong><br/><Typography.Text type="secondary">{row.phone}</Typography.Text></> }, { title: 'Dịch vụ', width: 120, ellipsis: true, render: (_, row) => row.quoteSnapshot?.serviceName || '—' }, { title: 'Địa điểm', dataIndex: 'venue', width: 250, ellipsis: true }, { title: 'Loại giá', width: 135, render: (_, row) => priceTag(row.quoteSnapshot?.priceStatus) }, { title: 'Tổng thanh toán', width: 150, render: (_, row) => row.quoteSnapshot?.total == null ? <Typography.Text type="warning">Liên hệ báo giá</Typography.Text> : vnd(row.quoteSnapshot.total) }, { title: 'Trạng thái', width: 175, render: (_, row) => statusSelect(row) }, { title: '', fixed: 'right', width: 60, render: (_, row) => <Button type="text" aria-label={`Review yêu cầu ${row.code}`} icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}/> }]}/></div>
       <div className="quotation-mobile-list" aria-label="Danh sách yêu cầu báo giá">{loading ? <div className="quotation-mobile-loading"><Spin/><span>Đang tải yêu cầu…</span></div> : requests.length ? requests.map(row => <article className="quotation-mobile-card" key={row.id}><div className="quotation-mobile-card-main"><div className="quotation-mobile-card-head"><strong>{row.code}</strong>{priceTag(row.quoteSnapshot?.priceStatus)}</div><h3>{row.customerName}</h3><a href={`tel:${row.phone}`}>{row.phone}</a><dl><div><dt>Dịch vụ</dt><dd>{row.quoteSnapshot?.serviceName || '—'}</dd></div><div><dt>Địa điểm</dt><dd>{row.venue}</dd></div><div><dt>Tổng dự kiến</dt><dd>{row.quoteSnapshot?.total == null ? 'Liên hệ báo giá' : vnd(row.quoteSnapshot.total)}</dd></div></dl></div><div className="quotation-mobile-card-actions">{statusSelect(row, true)}<Button icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}>Review</Button></div></article>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có yêu cầu báo giá"/>}</div>
     </Card>
-    <Modal className="quotation-review-modal" width={900} title={null} open={!!requestDetail} onCancel={() => setRequestDetail(null)} footer={requestDetail ? <div className="quotation-review-actions"><Button onClick={() => setRequestDetail(null)}>Đóng</Button>{isAdmin && !requestDetail.eventId && requestDetail.status === 'CONTACTED' && <Button type="primary" icon={<CalendarOutlined/>} onClick={() => openSchedule(requestDetail)}>Xác nhận & khóa lịch</Button>}{requestDetail.eventId && <Button disabled icon={<CheckCircleOutlined/>}>Đã khóa lịch</Button>}</div> : null}>
-      {requestDetail && <div className="quotation-review">
+    <Modal className="quotation-review-modal" width={900} title={null} open={!!requestDetail} onCancel={() => setRequestDetail(null)} footer={requestDetail ? <div className="quotation-review-actions"><Button icon={<DownloadOutlined/>} loading={exportingPdf} onClick={() => void exportPdf()}>Tải PDF</Button><Button onClick={() => setRequestDetail(null)}>Đóng</Button>{isAdmin && !requestDetail.eventId && requestDetail.status === 'CONTACTED' && <Button type="primary" icon={<CalendarOutlined/>} onClick={() => openSchedule(requestDetail)}>Xác nhận & khóa lịch</Button>}{requestDetail.eventId && <Button disabled icon={<CheckCircleOutlined/>}>Đã khóa lịch</Button>}</div> : null}>
+      {requestDetail && <div ref={reviewRef} className="quotation-review">
         <header className="quotation-review-header"><div><span>YÊU CẦU BÁO GIÁ</span><h2>{requestDetail.code}</h2><Typography.Text type="secondary">Gửi lúc {dayjs(requestDetail.createdAt).format('DD/MM/YYYY HH:mm')}</Typography.Text></div><Space wrap>{priceTag(requestDetail.quoteSnapshot.priceStatus)}<Tag color={statusColors[requestDetail.status]}>{quotationStatusLabels[requestDetail.status] || requestDetail.status}</Tag></Space></header>
         <section className="quotation-review-section"><h3>Khách hàng</h3><Descriptions column={{ xs: 1, sm: 2 }} items={[{ key: 'name', label: 'Họ tên', children: <strong>{requestDetail.customerName}</strong> }, { key: 'phone', label: 'Điện thoại', children: <Typography.Link href={`tel:${requestDetail.phone}`}>{requestDetail.phone}</Typography.Link> }, { key: 'email', label: 'Email', children: requestDetail.email ? <Typography.Link href={`mailto:${requestDetail.email}`}>{requestDetail.email}</Typography.Link> : '—' }]}/></section>
         <section className="quotation-review-section"><h3>Thông tin sự kiện</h3><Descriptions column={{ xs: 1, sm: 2 }} items={[{ key: 'service', label: 'Dịch vụ', children: <strong>{requestDetail.quoteSnapshot.serviceName || '—'}</strong> }, { key: 'date', label: 'Ngày dự kiến', children: requestDetail.eventDate ? dayjs(requestDetail.eventDate).format('DD/MM/YYYY') : 'Chưa xác định' }, { key: 'time', label: 'Giờ dự kiến', children: requestDetail.eventTime || 'Chưa xác định' }, { key: 'venue', label: 'Địa điểm', span: 2, children: requestDetail.venue }, ...selectionItems(requestDetail.quoteSnapshot)]}/></section>
-        <section className="quotation-review-section quotation-price-section"><div className="quotation-section-title"><h3>Chi tiết báo giá</h3>{priceTag(requestDetail.quoteSnapshot.priceStatus)}</div><div className="quotation-items-table"><Table size="small" rowKey="id" pagination={false} tableLayout="fixed" dataSource={requestDetail.quoteSnapshot.items || []} locale={{ emptyText: requestDetail.quoteSnapshot.priceStatus === 'CONTACT_ONLY' ? 'Báo giá sẽ được xác nhận khi liên hệ khách hàng' : 'Chưa có hạng mục' }} columns={[{ title: 'Hạng mục', dataIndex: 'label' }, { title: 'Thành tiền', dataIndex: 'amount', width: 180, align: 'right', render: vnd }]}/></div><div className="quotation-items-mobile">{requestDetail.quoteSnapshot.items?.length ? requestDetail.quoteSnapshot.items.map(item => <div key={item.id}><span>{item.label}</span><strong>{vnd(item.amount)}</strong></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={requestDetail.quoteSnapshot.priceStatus === 'CONTACT_ONLY' ? 'Báo giá sẽ được xác nhận khi liên hệ' : 'Chưa có hạng mục'}/>}</div>{requestDetail.quoteSnapshot.discount && <div className="quotation-discount-row"><span><Tag color="green">{requestDetail.quoteSnapshot.discount.code}</Tag>{requestDetail.quoteSnapshot.discount.name}</span><strong>-{vnd(requestDetail.quoteSnapshot.discount.amount)}</strong></div>}<div className="quotation-total"><span>Tổng dự kiến{requestDetail.quoteSnapshot.discount && <small>Tạm tính trước ưu đãi: {vnd(requestDetail.quoteSnapshot.subtotal)}</small>}<small>{requestDetail.quoteSnapshot.priceMessage || 'Chưa bao gồm các chi phí phát sinh được hai bên xác nhận.'}</small></span><strong>{requestDetail.quoteSnapshot.total == null ? 'Liên hệ báo giá' : vnd(requestDetail.quoteSnapshot.total)}</strong></div></section>
+        <section className="quotation-review-section quotation-price-section"><div className="quotation-section-title"><h3>Chi tiết báo giá</h3>{priceTag(requestDetail.quoteSnapshot.priceStatus)}</div><div className="quotation-items-table"><Table size="small" rowKey="id" pagination={false} tableLayout="fixed" dataSource={requestDetail.quoteSnapshot.items || []} locale={{ emptyText: requestDetail.quoteSnapshot.priceStatus === 'CONTACT_ONLY' ? 'Báo giá sẽ được xác nhận khi liên hệ khách hàng' : 'Chưa có hạng mục' }} columns={[{ title: 'Hạng mục', dataIndex: 'label' }, { title: 'Thành tiền', dataIndex: 'amount', width: 180, align: 'right', render: vnd }]}/></div><div className="quotation-items-mobile">{requestDetail.quoteSnapshot.items?.length ? requestDetail.quoteSnapshot.items.map(item => <div key={item.id}><span>{item.label}</span><strong>{vnd(item.amount)}</strong></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={requestDetail.quoteSnapshot.priceStatus === 'CONTACT_ONLY' ? 'Báo giá sẽ được xác nhận khi liên hệ' : 'Chưa có hạng mục'}/>}</div>{requestDetail.quoteSnapshot.discount && <div className="quotation-discount-row"><span><Tag color="green">{requestDetail.quoteSnapshot.discount.code}</Tag>{requestDetail.quoteSnapshot.discount.name}</span><strong>-{vnd(requestDetail.quoteSnapshot.discount.amount)}</strong></div>}<div className="quotation-total"><span>Tổng thanh toán{requestDetail.quoteSnapshot.discount && <small>Tạm tính trước ưu đãi: {vnd(requestDetail.quoteSnapshot.subtotal)}</small>}{requestDetail.quoteSnapshot.taxableAmount != null && <small>Tạm tính sau ưu đãi: {vnd(requestDetail.quoteSnapshot.taxableAmount)}</small>}{requestDetail.quoteSnapshot.vatAmount != null && <small>VAT {requestDetail.quoteSnapshot.vatEnabled ? `${requestDetail.quoteSnapshot.vatRate ?? 0}%` : '(không áp dụng)'}: {vnd(requestDetail.quoteSnapshot.vatAmount)}</small>}</span><strong>{requestDetail.quoteSnapshot.total == null ? 'Liên hệ báo giá' : vnd(requestDetail.quoteSnapshot.total)}</strong></div></section>
         {requestDetail.notes && <section className="quotation-review-section"><h3>Ghi chú của khách hàng</h3><p className="quotation-customer-note">{requestDetail.notes}</p></section>}
         {requestDetail.eventId && <Alert type="success" showIcon message="Yêu cầu đã được chốt lịch" description="Sự kiện đã được tạo trong hệ thống và sẵn sàng để phân công nhân sự."/>}
       </div>}
