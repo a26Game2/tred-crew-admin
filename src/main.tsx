@@ -7,12 +7,13 @@ import 'antd/dist/reset.css';
 import './styles.css';
 import { Shell, LoginPage, PermissionRoute, Protected } from './shell';
 import { AttendancePage, AuditPage, CalendarPage, CatalogPage, ComingSoonPage, Dashboard, EmployeesPage, EquipmentDetailPage, EquipmentListPage, EventsPage, LarkPage, MaterialListPage, OfficePage, PointsPage, ServicesPage, UsersPage } from './pages';
+import { adminTheme } from './theme';
 
 const allowed = (permission: string, page: React.ReactNode) => <PermissionRoute permission={permission}>{page}</PermissionRoute>;
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider locale={viVN} theme={{ token: { colorPrimary: '#567345', colorInfo: '#567345', colorText: '#202b22', colorBgContainer: '#fff', borderRadius: 10, fontFamily: 'Be Vietnam Pro, sans-serif', fontSize: 14 }, components: { Button: { controlHeight: 40, fontWeight: 600 }, Table: { headerBg: '#fafbf9', headerColor: '#758075', borderColor: '#edf0eb', cellPaddingBlock: 15 }, Input: { controlHeight: 42 }, Select: { controlHeight: 42 } } }}>
+    <ConfigProvider locale={viVN} theme={adminTheme}>
       <AntApp><BrowserRouter><Routes>
         <Route path="/login" element={<LoginPage/>}/>
         <Route element={<Protected/>}><Route element={<Shell/>}>
