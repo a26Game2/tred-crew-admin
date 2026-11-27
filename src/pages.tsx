@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   App,
   Avatar,
@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Checkbox,
+  ColorPicker,
   DatePicker,
   Empty,
   Form,
@@ -58,8 +59,38 @@ import { EventCalendar } from "./event-calendar";
 import { Office25DScene, Outdoor25DScene, type OfficeEventGroup, type OfficeMember, type OfficeRoom } from "./office-25d";
 import { permissionGroups } from "./permissions";
 import { useNewQuotationCount } from "./quotation-notifications";
+import employeeBadgeSheet from "./assets/employee-badges-preview.png";
+import { defaultBadgeBorderColor, normalizeBadgeBorderColor } from "./badge-color";
 
 type Row = Record<string, any>;
+const employeeBadgeArtIndex: Record<string, number> = { CameraOutlined: 0, VideoCameraOutlined: 1, SyncOutlined: 2, FireOutlined: 3, StarOutlined: 4 };
+const employeeBadgeTier = (code: string) => code.endsWith("-diamond") ? "diamond" : code.endsWith("-gold") ? "gold" : code.endsWith("-silver") ? "silver" : "standard";
+function EmployeeBadgeAccentArt() {
+  return <svg className="employee-badge-accent-art" viewBox="0 0 100 100" aria-hidden="true">
+    <g className="employee-badge-accent-laurel">
+      <path d="M44 80C31 75 21 61 20 40"/>
+      <ellipse cx="21" cy="46" rx="4" ry="8" transform="rotate(-28 21 46)"/><ellipse cx="24" cy="56" rx="4" ry="8" transform="rotate(-39 24 56)"/><ellipse cx="30" cy="66" rx="4" ry="8" transform="rotate(-49 30 66)"/><ellipse cx="38" cy="74" rx="4" ry="8" transform="rotate(-58 38 74)"/>
+      <g transform="translate(100 0) scale(-1 1)"><path d="M44 80C31 75 21 61 20 40"/><ellipse cx="21" cy="46" rx="4" ry="8" transform="rotate(-28 21 46)"/><ellipse cx="24" cy="56" rx="4" ry="8" transform="rotate(-39 24 56)"/><ellipse cx="30" cy="66" rx="4" ry="8" transform="rotate(-49 30 66)"/><ellipse cx="38" cy="74" rx="4" ry="8" transform="rotate(-58 38 74)"/></g>
+    </g>
+    <g className="employee-badge-accent-medallion"><circle cx="50" cy="80" r="9"/><circle cx="50" cy="80" r="5"/></g>
+  </svg>;
+}
+function EmployeeBadgeStrip({ badges }: { badges: Row[] }) {
+  return <div className="employee-badge-strip" aria-label="Danh sách huy hiệu">
+    {badges.map((badge) => {
+      const artIndex = employeeBadgeArtIndex[badge.icon];
+      const tier = employeeBadgeTier(badge.code);
+      const remaining = Math.max(0, Number(badge.target) - Number(badge.progress));
+      const unit = badge.code.startsWith("diligent-") ? "ngày làm việc" : "lượt dịch vụ";
+      const detail = badge.earned ? "Đã đạt huy hiệu" : `Còn ${remaining} ${unit} để mở khóa`;
+      return <Tooltip key={badge.code} trigger={["hover", "focus", "click"]} mouseEnterDelay={0.15} title={<div className="employee-badge-tooltip"><strong>{badge.name}</strong><span>{detail}</span><small>{badge.progress}/{badge.target}</small></div>}>
+        <span tabIndex={0} style={{ "--badge-accent": normalizeBadgeBorderColor(badge.borderColor, badge.code) } as CSSProperties} className={`employee-badge-token ${badge.earned ? "earned" : "locked"} tier-${tier}`} aria-label={`${badge.name}. ${detail}. Tiến độ ${badge.progress} trên ${badge.target}`}>
+          <span className="employee-badge-visual" aria-hidden="true"><span className="employee-badge-art" style={artIndex === undefined ? undefined : { backgroundImage: `url(${employeeBadgeSheet})`, backgroundPosition: `${artIndex * 25}% center` }}>{artIndex === undefined ? "★" : null}</span>{artIndex !== undefined && artIndex <= 2 ? <EmployeeBadgeAccentArt/> : null}</span>
+        </span>
+      </Tooltip>;
+    })}
+  </div>;
+}
 const date = (v?: string) => (v ? dayjs(v).format("DD/MM/YYYY HH:mm") : "—");
 const statuses: Record<string, string> = {
   ACTIVE: "Đang hoạt động",
@@ -991,7 +1022,7 @@ type ServiceHistory = { id: string; content: string; createdAt: string; createdB
 type ServiceMachineUsage = { allocatedRevenue: number; laborCost: number; transportCost: number; consumableCost: number; repairCost: number; outsourcedCost: number; otherCost: number; usageMinutes: number; createdAt: string; order: { performedAt: string; event?: { id: string; code?: string; name: string } } };
 type ServiceMachine = { id: string; code: string; name: string; status: "READY" | "IN_USE" | "MAINTENANCE" | "RETIRED"; purchaseCost: number; startedAt?: string; note?: string; equipment?: { id: number; name: string; qrCode: string }; usageCount: number; revenue: number; cost: number; profit: number; usageMinutes: number; recentUsages: ServiceMachineUsage[] };
 type ServiceFinance = { usageCount: number; revenue: number; cost: number; profit: number; usageMinutes: number };
-type ServiceItem = { id: number; code: string; name: string; note?: string; purchasePrice: number; createdAt: string; updatedAt: string; catalogGroup: { id: string; code: string; shortName?: string; name: string }; images: ServiceImage[]; machines: ServiceMachine[]; finance: ServiceFinance; _count: { images: number; history: number } };
+type ServiceItem = { id: number; code: string; name: string; badgeCategory?: string | null; note?: string; purchasePrice: number; createdAt: string; updatedAt: string; catalogGroup: { id: string; code: string; shortName?: string; name: string }; images: ServiceImage[]; machines: ServiceMachine[]; finance: ServiceFinance; _count: { images: number; history: number } };
 type ServiceDetail = ServiceItem & { history: ServiceHistory[] };
 const vnd = (value: number) => `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
 
@@ -1068,6 +1099,7 @@ function ServiceDetailModal({ id, groups, onClose, onChanged }: { id: number; gr
   const upload = async (file: File) => { try { await request(`/service-items/${id}/images`, { method: "POST", body: { fileName: file.name, dataUrl: await fileAsDataUrl(file) } }); message.success("Đã tải ảnh và lưu thời gian upload"); await detail.load(); onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể tải ảnh"); } };
   return <Modal width={1180} className="service-detail-modal" title={detail.data ? `${detail.data.code} — ${detail.data.name}` : "Chi tiết dịch vụ"} open onCancel={onClose} footer={null} destroyOnHidden><ErrorNotice error={detail.error}/>{detail.loading || !detail.data ? <div className="modal-loading"><Spin/></div> : <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
     { key: "information", label: "Thông tin & PUBLISHED", children: <div className="service-tab-content"><Form form={form} layout="vertical" disabled={!isAdmin} onFinish={async (values) => { setSaving(true); try { await request(`/service-items/${id}`, { method: "PATCH", body: values }); message.success("Đã lưu thông tin dịch vụ"); await detail.load(); onChanged(); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể cập nhật"); } finally { setSaving(false); } }}><div className="form-pair"><Form.Item name="name" label="Tên dịch vụ" rules={[{ required: true }]}><Input/></Form.Item><Form.Item name="catalogGroupId" label="Loại / nhóm dịch vụ" rules={[{ required: true }]}><Select options={groups.map((group) => ({ value: group.id, label: `${group.code} — ${group.name}` }))}/></Form.Item></div><div className="form-pair"><Form.Item name="purchasePrice" label="Giá nhập (VND)" rules={[{ required: true }]}><VndInput/></Form.Item><Form.Item label="Ngày cập nhật"><Input value={date(detail.data.updatedAt)} disabled/></Form.Item></div><Form.Item name="note" label="Ghi chú"><Input.TextArea rows={3}/></Form.Item>{isAdmin && <Button type="primary" htmlType="submit" icon={<SaveOutlined/>} loading={saving}>Lưu thông tin</Button>}</Form><ServicePublicationPanel serviceId={id} onConfigure={() => setActiveTab("pricing")} onChanged={onChanged}/><section className="service-tab-section"><div className="service-detail-heading"><div><h3>Lịch sử & tình trạng</h3><p>Ghi nhận hư hỏng khi đi show hoặc trong quá trình vận chuyển.</p></div></div><div className="service-history-form"><Input.TextArea value={history} onChange={(event) => setHistory(event.target.value)} rows={2} maxLength={2000} placeholder="Ví dụ: Đi show bị hư chân đế, trầy khi vận chuyển..."/><Button type="primary" disabled={!history.trim()} onClick={async () => { try { await request(`/service-items/${id}/history`, { method: "POST", body: { content: history } }); setHistory(""); await detail.load(); onChanged(); message.success("Đã thêm lịch sử"); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể thêm lịch sử"); } }}>Thêm lịch sử</Button></div>{detail.data.history.length ? <div className="service-history-list">{detail.data.history.map((entry) => <article key={entry.id}><span className="history-dot"/><div><strong>{entry.createdBy.fullName}</strong><time>{date(entry.createdAt)}</time><p>{entry.content}</p></div></article>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có lịch sử"/>}</section></div> },
+    { key: "badge", label: "Huy hiệu nhân viên", children: <div className="service-tab-content"><section className="service-tab-section"><div className="service-detail-heading"><div><h3>Nhóm kinh nghiệm badge</h3><p>Sự kiện liên kết với dịch vụ này sẽ cộng một lượt vào nhóm badge đã chọn khi nhân viên check-in.</p></div></div><Select allowClear disabled={!isAdmin} placeholder="Không tính badge cho dịch vụ này" value={detail.data.badgeCategory || undefined} style={{ width: 300 }} options={[{ value: "SERVICE_PTB", label: "Photobooth" }, { value: "SERVICE_GLAMBOT", label: "Glambot" }, { value: "SERVICE_360", label: "Booth 360" }]} onChange={async (badgeCategory) => { try { await request(`/service-items/${id}`, { method: "PATCH", body: { badgeCategory: badgeCategory || null } }); await detail.load(); onChanged(); message.success("Đã lưu nhóm badge của dịch vụ"); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể lưu nhóm badge"); } }}/></section></div> },
     { key: "finance", label: "Máy & hiệu quả tài chính", children: <ServiceFinanceSection service={detail.data} onChanged={async () => { await detail.load(); onChanged(); }}/> },
     { key: "images", label: "Ảnh dịch vụ", children: <div className="service-tab-content"><section className="service-tab-section service-images-section"><div className="service-detail-heading"><div><h3>Ảnh dịch vụ</h3><p>Quản lý thumbnail, vai trò ảnh và trạng thái hiển thị public.</p></div><Upload accept="image/jpeg,image/png,image/webp" showUploadList={false} beforeUpload={(file) => { if (file.size > 20_000_000) { message.error("Ảnh không được vượt quá 20 MB"); return Upload.LIST_IGNORE; } void upload(file); return false; }}><Button icon={<UploadOutlined/>}>Tải ảnh lên</Button></Upload></div>{detail.data.images.length ? <div className="service-image-grid">{detail.data.images.map((image) => <ServiceImageCard key={image.id} serviceId={id} image={image} canDelete={isAdmin} onMetadata={async (patch) => { try { await request(`/quotation/service-items/${id}/images/${image.id}/storefront`, { method: "PATCH", body: patch }); await detail.load(); message.success("Đã lưu thông tin ảnh"); } catch (error) { message.error(error instanceof Error ? error.message : "Không thể lưu thông tin ảnh"); } }} onThumbnail={async () => { await request(`/service-items/${id}/images/${image.id}/thumbnail`, { method: "PATCH" }); await detail.load(); onChanged(); message.success("Đã chọn ảnh thumbnail"); }} onDelete={async () => { await request(`/service-items/${id}/images/${image.id}`, { method: "DELETE" }); await detail.load(); onChanged(); }}/>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có ảnh dịch vụ"/>}</section></div> },
     { key: "pricing", label: "Nội dung & gói giá", children: <ServicePricingContent serviceId={id} serviceName={detail.data.name} onChanged={onChanged}/> },
@@ -1136,6 +1168,8 @@ export function CalendarPage() {
 }
 
 export function EventsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
@@ -1145,6 +1179,7 @@ export function EventsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [details, setDetails] = useState<Row | null>(null);
+  const [eventTab, setEventTab] = useState<"info" | "assign">("info");
   const [form] = Form.useForm();
   const [assignForm] = Form.useForm();
   const dateRange = useMemo(() => {
@@ -1162,6 +1197,7 @@ export function EventsPage() {
   );
   const employees = useData<Row[]>("/employees?pageSize=100", []);
   const types = useData<Row[]>("/employee-types", []);
+  const eventServices = useData<Row[]>("/service-items?pageSize=100", []);
   const assign = useData<Row[]>(
     details ? `/events/${details.id}/assignments` : "/events?pageSize=1",
     [],
@@ -1181,8 +1217,10 @@ export function EventsPage() {
       },
       ids.length === 1 ? "Đã xoá sự kiện" : "Đã xoá các sự kiện đã chọn",
     );
-  const show = (r?: Row) => {
+  const show = (r?: Row, tab: "info" | "assign" = "info") => {
     setEditing(r || null);
+    setDetails(r || null);
+    setEventTab(tab);
     form.resetFields();
     if (r)
       form.setFieldsValue({
@@ -1193,6 +1231,23 @@ export function EventsPage() {
     else form.setFieldsValue({ timeConfirmed: true });
     setOpen(true);
   };
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get("eventId");
+    if (!id) return;
+    let active = true;
+    void request<Row>(`/events/${encodeURIComponent(id)}`).then((response) => {
+      if (!active) return;
+      show(response.data);
+    }).catch((error) => {
+      if (active) void Modal.error({ title: "Không mở được sự kiện", content: error instanceof Error ? error.message : "Vui lòng thử lại." });
+    });
+    return () => { active = false; };
+  }, [location.search]);
+  const closeEvent = () => {
+    setOpen(false);
+    setDetails(null);
+    if (new URLSearchParams(location.search).has("eventId")) navigate("/events", { replace: true });
+  };
   const columns = [
     {
       title: "SỰ KIỆN",
@@ -1200,7 +1255,7 @@ export function EventsPage() {
         <div>
           <strong>{r.name}</strong>
           <div className="subline">
-            {r.code || r.location || "Chưa có địa điểm"}
+            {r.code || r.location || "Chưa có địa điểm"}{r.badgeService?.name ? ` · ${r.badgeService.name}` : ""}
           </div>
         </div>
       ),
@@ -1225,14 +1280,9 @@ export function EventsPage() {
       title: "",
       render: (_: any, r: Row) => (
         <Space>
-          <Button size="small" onClick={() => setDetails(r)}>
-            Chi tiết
-          </Button>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => show(r)}
-          />
+          <Tooltip title="Chi tiết và chỉnh sửa sự kiện">
+            <Button size="small" icon={<EditOutlined />} aria-label="Chi tiết và chỉnh sửa sự kiện" onClick={() => show(r)} />
+          </Tooltip>
           <Popconfirm
             title="Xoá sự kiện này?"
             description="Dữ liệu sẽ bị ẩn khỏi hệ thống và có thể xem lại trong nhật ký."
@@ -1327,32 +1377,35 @@ export function EventsPage() {
         />
       </Panel>
       <Modal
-        title={editing ? "Chỉnh sửa sự kiện" : "Tạo sự kiện"}
+        title={editing ? editing.name : "Tạo sự kiện"}
         open={open}
-        onCancel={() => setOpen(false)}
-        onOk={() => form.submit()}
-        okText="Lưu"
-        cancelText="Hủy"
+        onCancel={closeEvent}
+        footer={null}
+        width={720}
       >
+        {editing && <Tabs activeKey={eventTab} onChange={(key) => setEventTab(key as "info" | "assign")} items={[{ key: "info", label: "Thông tin" }, { key: "assign", label: "Phân công" }]} />}
+        {eventTab === "info" && <>
         <Form
           form={form}
           layout="vertical"
           onFinish={async (v) => {
             const body = {
               ...v,
+              serviceId: v.serviceId ?? null,
               startAt: v.startAt?.toISOString(),
               endAt: v.endAt?.toISOString(),
             };
             if (
               await act(async () => {
-                await request(editing ? `/events/${editing.id}` : "/events", {
+                const saved = await request<Row>(editing ? `/events/${editing.id}` : "/events", {
                   method: editing ? "PATCH" : "POST",
                   body,
                 });
+                if (editing) { setEditing(saved.data); setDetails(saved.data); }
                 await data.load();
               })
             )
-              setOpen(false);
+              if (!editing) closeEvent();
           }}
         >
           <Form.Item
@@ -1367,6 +1420,9 @@ export function EventsPage() {
               <Input />
             </Form.Item>
           )}
+          <Form.Item label="Dịch vụ" name="serviceId" rules={[{ required: true, message: "Chọn dịch vụ từ danh sách dịch vụ" }]} extra="Nhóm badge được lấy từ cấu hình của dịch vụ. Có thể chỉnh tại Danh sách dịch vụ → Huy hiệu nhân viên.">
+            <Select showSearch optionFilterProp="label" placeholder="Chọn dịch vụ cho sự kiện" options={eventServices.data.map((service) => ({ value: service.id, label: `${service.code} · ${service.name}${service.badgeCategory ? ` · ${({ SERVICE_PTB: "PTB", SERVICE_GLAMBOT: "Glambot", SERVICE_360: "360" } as Record<string, string>)[service.badgeCategory]}` : ""}` }))}/>
+          </Form.Item>
           <div className="form-pair">
             <Form.Item
               label="Bắt đầu"
@@ -1404,20 +1460,10 @@ export function EventsPage() {
               ].map((v) => ({ value: v, label: statuses[v] }))}
             />
           </Form.Item>
+          <Button htmlType="submit" type="primary">Lưu sự kiện</Button>
         </Form>
-      </Modal>
-      <Modal
-        title={details?.name}
-        open={!!details}
-        onCancel={() => setDetails(null)}
-        footer={null}
-        width={650}
-      >
-        <p className="modal-description">
-          {details?.timeConfirmed
-            ? `${date(details.startAt)} — ${date(details.endAt)}`
-            : `${dayjs(details?.startAt).format("DD/MM/YYYY")} · Chưa xác định giờ`}
-        </p>
+        </>}
+        {eventTab === "assign" && details && <>
         <h3>Nhân sự được phân công</h3>
         <ErrorNotice error={assign.error} />
         {assign.data.length && details ? (
@@ -1511,6 +1557,7 @@ export function EventsPage() {
             Phân công
           </Button>
         </Form>
+        </>}
       </Modal>
     </>
   );
@@ -1519,7 +1566,12 @@ export function EventsPage() {
 export function AttendancePage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const data = useData<Row[]>(`/attendance?page=${page}&pageSize=${pageSize}`, []);
+  const [eventId, setEventId] = useState<string>();
+  const [location, setLocation] = useState<string>();
+  const events = useData<Row[]>("/events?page=1&pageSize=100", []);
+  const eventOptions = events.data.filter((event) => !location || event.location === location);
+  const locations = [...new Set(events.data.map((event) => event.location).filter(Boolean))] as string[];
+  const data = useData<Row[]>(`/attendance?page=${page}&pageSize=${pageSize}${eventId ? `&eventId=${eventId}` : ""}${location ? `&location=${encodeURIComponent(location)}` : ""}`, []);
   const employees = useData<Row[]>("/employees?pageSize=100", []);
   const [photo, setPhoto] = useState<string>();
   const act = useAction();
@@ -1601,6 +1653,12 @@ export function AttendancePage() {
         description={`${data.meta?.total ?? "—"} lượt đã ghi nhận`}
       >
         <ErrorNotice error={data.error} />
+        <div className="equipment-filters" style={{ marginBottom: 16 }}>
+          <Select allowClear placeholder="Lọc theo điểm tổ chức" value={location} onChange={(value) => { setLocation(value); setEventId(undefined); setPage(1); }} style={{ width: 260 }} options={locations.map((value) => ({ value, label: value }))} />
+          <Select allowClear placeholder="Chọn lịch / sự kiện" value={eventId} onChange={(value) => { setEventId(value); setPage(1); }} style={{ width: 320 }} options={eventOptions.map((event) => ({ value: event.id, label: `${event.name}${event.location ? ` · ${event.location}` : ""}` }))} />
+          <Button icon={<ReloadOutlined />} loading={data.loading || events.loading} onClick={() => { void data.load(); void events.load(); }}>Làm mới</Button>
+        </div>
+        {eventId && <div className="subline" style={{ marginBottom: 12 }}>Đang theo dõi lịch: {events.data.find((event) => event.id === eventId)?.name || "Sự kiện đã chọn"}</div>}
         <GridTable
           data={data.data}
           loading={data.loading}
@@ -1627,13 +1685,60 @@ export function AttendancePage() {
   );
 }
 
+type MonthlyAttendanceData = { employees: Row[]; summary: { checkIns: number; completed: number; open: number } };
+export function MonthlyAttendancePage() {
+  const [month, setMonth] = useState(dayjs());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
+  const [filter, setFilter] = useState<'ALL' | 'COMPLETED' | 'OPEN' | 'NONE'>('ALL');
+  const employees = useData<Row[]>('/employees?page=1&pageSize=100', []);
+  const data = useData<MonthlyAttendanceData>(`/attendance/monthly${query({ month: month.format('YYYY-MM'), page, pageSize, employeeIds: employeeIds.join(','), status: filter })}`, { employees: [], summary: { checkIns: 0, completed: 0, open: 0 } });
+  const days = useMemo(() => Array.from({ length: month.daysInMonth() }, (_, index) => index + 1), [month]);
+  const columns = [
+    { title: 'NHÂN SỰ', fixed: 'left' as const, width: 190, render: (_: unknown, row: Row) => <div><strong>{row.displayName}</strong><div className="subline">{row.user?.email}</div></div> },
+    { title: 'CI', fixed: 'left' as const, width: 64, align: 'center' as const, render: (_: unknown, row: Row) => row.attendanceRecords?.length || 0 },
+    { title: 'CO', fixed: 'left' as const, width: 64, align: 'center' as const, render: (_: unknown, row: Row) => row.attendanceRecords?.filter((item: Row) => item.checkOutAt).length || 0 },
+    { title: 'CHƯA CO', fixed: 'left' as const, width: 94, align: 'center' as const, render: (_: unknown, row: Row) => { const count = row.attendanceRecords?.filter((item: Row) => !item.checkOutAt).length || 0; return count ? <Tag color="orange">{count}</Tag> : '0'; } },
+    ...days.map((day) => ({ title: String(day).padStart(2, '0'), width: 62, align: 'center' as const, render: (_: unknown, row: Row) => {
+      const workDate = `${month.format('YYYY-MM')}-${String(day).padStart(2, '0')}`;
+      const attendance = row.attendanceRecords?.find((item: Row) => item.workDate === workDate);
+      if (!attendance) return <span className="muted">—</span>;
+      const complete = Boolean(attendance.checkOutAt);
+      const title = `${attendance.event?.name ? `${attendance.event.name} · ` : ''}Check-in ${dayjs(attendance.checkInAt).format('HH:mm')}${complete ? ` · Check-out ${dayjs(attendance.checkOutAt).format('HH:mm')}` : ' · Chưa check-out'}`;
+      return <Tooltip title={title}><Tag color={complete ? 'green' : 'orange'}>{complete ? 'CI/CO' : 'CI'}</Tag></Tooltip>;
+    } })),
+  ];
+  return <>
+    <Heading eyebrow="SỰ KIỆN / CHẤM CÔNG" title="Lịch chấm công" subtitle="Theo dõi check-in và check-out của từng nhân sự theo tháng." />
+    <Panel title={`Chấm công tháng ${month.format('MM/YYYY')}`} description="CI/CO: đã check-in và check-out · CI: đang chờ check-out.">
+      <div className="equipment-filters" style={{ marginBottom: 16 }}>
+        <DatePicker picker="month" value={month} allowClear={false} format="MM/YYYY" onChange={(value) => { if (value) { setMonth(value); setPage(1); } }} />
+        <Select mode="multiple" allowClear showSearch optionFilterProp="label" placeholder="Lọc một hoặc nhiều nhân sự" value={employeeIds} onChange={(value) => { setEmployeeIds(value); setPage(1); }} maxTagCount="responsive" style={{ width: 320 }} options={employees.data.map((employee) => ({ value: employee.id, label: employee.displayName }))} />
+        <Select value={filter} onChange={(value) => { setFilter(value); setPage(1); }} style={{ width: 190 }} options={[{ value: 'ALL', label: 'Tất cả trạng thái' }, { value: 'COMPLETED', label: 'Đã check-out' }, { value: 'OPEN', label: 'Chưa check-out' }, { value: 'NONE', label: 'Chưa chấm công' }]} />
+        <Button icon={<ReloadOutlined/>} loading={data.loading} onClick={() => void data.load()}>Làm mới</Button>
+      </div>
+      <div className="stat-grid" style={{ marginBottom: 20 }}><div className="stat-card"><small>CHECK-IN</small><strong>{data.data.summary.checkIns}</strong></div><div className="stat-card"><small>ĐÃ CHECK-OUT</small><strong>{data.data.summary.completed}</strong></div><div className="stat-card"><small>CHƯA CHECK-OUT</small><strong>{data.data.summary.open}</strong></div></div>
+      <ErrorNotice error={data.error} />
+      <Table rowKey="id" loading={data.loading} columns={columns} dataSource={data.data.employees} scroll={{ x: 1900 }} pagination={data.meta ? { current: data.meta.page, pageSize: data.meta.pageSize, total: data.meta.total, showSizeChanger: true, pageSizeOptions: tablePageSizeOptions, hideOnSinglePage: true, onChange: (nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); } } : false} locale={{ emptyText: empty }} />
+    </Panel>
+  </>;
+}
+
 export function PointsPage() {
   const employees = useData<Row[]>("/employees?pageSize=100", []);
   const config = useData<Row>("/attendance/exp-config", {});
+  const badgeData = useData<Row[]>("/badges", []);
+  const badgeProgress = useData<Row[]>("/badges/progress", []);
+  const experienceHistory = useData<Row[]>("/badges/experience", []);
+  const [badgeDraft, setBadgeDraft] = useState<Row[]>([]);
+  const [experienceForm] = Form.useForm();
   const [id, setId] = useState("");
+  const [pointsPage, setPointsPage] = useState(1);
+  const [pointsPageSize, setPointsPageSize] = useState(10);
   const points = useData<Row[]>(
     id
-      ? `/employees/${id}/point-transactions?pageSize=100`
+      ? `/employees/${id}/point-transactions${query({ page: pointsPage, pageSize: pointsPageSize })}`
       : "/employees?pageSize=1",
     [],
   );
@@ -1644,6 +1749,7 @@ export function PointsPage() {
   useEffect(() => {
     expForm.setFieldsValue(config.data);
   }, [config.data, expForm]);
+  useEffect(() => { setBadgeDraft(badgeData.data.map((badge) => ({ ...badge, borderColor: normalizeBadgeBorderColor(badge.borderColor, badge.code) }))); }, [badgeData.data]);
   const columns = [
     {
       title: "ĐIỂM",
@@ -1655,13 +1761,14 @@ export function PointsPage() {
         </strong>
       ),
     },
+    { title: "LOẠI", render: (_: unknown, r: Row) => <Tag color={r.source === "ATTENDANCE" ? "blue" : "default"}>{r.source === "ATTENDANCE" ? "EXP tự động" : "Điểm admin"}</Tag> },
     { title: "LÝ DO", dataIndex: "reason" },
     { title: "TRẠNG THÁI", dataIndex: "status", render: status },
     { title: "NGÀY TẠO", dataIndex: "createdAt", render: date },
     {
       title: "",
       render: (_: any, r: Row) =>
-        r.status === "PENDING" ? (
+        r.status === "PENDING" && r.source !== "ATTENDANCE" ? (
           <Space>
             <Button
               size="small"
@@ -1743,24 +1850,20 @@ export function PointsPage() {
               label="Check-in hàng ngày"
               rules={[{ required: true }]}
             >
-              <InputNumber
-                min={0}
-                precision={0}
-                style={{ width: "100%" }}
-                addonAfter="EXP / ngày"
-              />
+              <Space.Compact style={{ width: "100%" }}>
+                <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+                <Input value="EXP / ngày" disabled style={{ width: 112 }} />
+              </Space.Compact>
             </Form.Item>
             <Form.Item
               name="eventExp"
               label="Check-in sự kiện"
               rules={[{ required: true }]}
             >
-              <InputNumber
-                min={0}
-                precision={0}
-                style={{ width: "100%" }}
-                addonAfter="EXP / sự kiện"
-              />
+              <Space.Compact style={{ width: "100%" }}>
+                <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+                <Input value="EXP / sự kiện" disabled style={{ width: 122 }} />
+              </Space.Compact>
             </Form.Item>
             <Button htmlType="submit" type="primary">
               Lưu cài đặt
@@ -1768,8 +1871,8 @@ export function PointsPage() {
           </Form>
         </Panel>
         <Panel
-          title="Lịch sử điểm"
-          description="Chọn một nhân sự để xem và duyệt điểm."
+          title="Lịch sử điểm & EXP"
+          description="Hiển thị điểm admin đề xuất và EXP tự động từ check-in."
           extra={
             <Button
               disabled={!id}
@@ -1782,11 +1885,15 @@ export function PointsPage() {
         >
           <Select
             showSearch
+            allowClear
             optionFilterProp="label"
             placeholder="Chọn nhân sự"
             style={{ width: "100%", maxWidth: 340, marginBottom: 20 }}
             value={id || undefined}
-            onChange={setId}
+            onChange={(employeeId) => {
+              setId(employeeId || "");
+              setPointsPage(1);
+            }}
             options={employees.data.map((e) => ({
               value: e.id,
               label: `${e.displayName} · ${e.user?.email || ""}`,
@@ -1795,11 +1902,7 @@ export function PointsPage() {
           {id ? (
             <>
               <ErrorNotice error={points.error} />
-              <GridTable
-                data={points.data}
-                loading={points.loading}
-                columns={columns}
-              />
+              {points.loading || points.data.length ? <GridTable data={points.data} loading={points.loading} columns={columns} meta={points.meta} onPage={(nextPage, nextPageSize) => { setPointsPage(nextPage); setPointsPageSize(nextPageSize); }} /> : <div className="empty-inline"><SafetyCertificateOutlined /><strong>Nhân sự này chưa có lịch sử điểm</strong><span>Điểm sẽ xuất hiện tại đây sau khi admin tạo và duyệt đề xuất.</span></div>}
             </>
           ) : (
             <div className="empty-inline">
@@ -1809,6 +1912,33 @@ export function PointsPage() {
           )}
         </Panel>
       </div>
+      <Panel title="Quản lý huy hiệu" description="Chỉnh tên, điều kiện, icon, màu viền và trạng thái hoạt động. Tiến độ được tính từ lượt sự kiện đã check-out và chuỗi ngày làm việc." extra={<Button type="primary" loading={badgeData.loading} onClick={() => void act(async () => { await request("/badges", { method: "PUT", body: { badges: badgeDraft.map((b, index) => ({ code: b.code, name: b.name, description: b.description, icon: b.icon, borderColor: normalizeBadgeBorderColor(b.borderColor, b.code), category: b.category, target: Number(b.target), isActive: Boolean(b.isActive), sortOrder: index + 1 })) } }); await badgeData.load(); await badgeProgress.load(); })}>Lưu cấu hình badge</Button>}>
+        <ErrorNotice error={badgeData.error || badgeProgress.error}/>
+        <Table rowKey="code" pagination={false} dataSource={badgeDraft} columns={[
+          { title: "BADGE", render: (_: unknown, row: Row) => <Input value={row.name} onChange={(event) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, name: event.target.value } : item))}/> },
+          { title: "ĐIỀU KIỆN", render: (_: unknown, row: Row) => <Input value={row.description} onChange={(event) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, description: event.target.value } : item))}/> },
+          { title: "ICON", dataIndex: "icon", render: (value: string, row: Row) => <Select value={value} style={{ width: 175 }} onChange={(icon) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, icon } : item))} options={["CameraOutlined","VideoCameraOutlined","SyncOutlined","FireOutlined","StarOutlined"].map((icon) => ({ value: icon, label: icon }))}/> },
+          { title: "MÀU HUY HIỆU", dataIndex: "borderColor", width: 160, render: (value: string, row: Row) => <ColorPicker value={normalizeBadgeBorderColor(value, row.code)} disabledAlpha showText size="small" onChange={(color) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, borderColor: normalizeBadgeBorderColor(color.toHexString(), row.code) } : item))}/> },
+          { title: "MỐC", dataIndex: "target", render: (value: number, row: Row) => <InputNumber min={1} value={value} onChange={(target) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, target: target || 1, description: item.category === "STREAK" ? `Điểm danh ${target || 1} ngày làm việc liên tiếp` : `Hoàn thành ${target || 1} lượt ${({ SERVICE_PTB: "Photobooth", SERVICE_GLAMBOT: "Glambot", SERVICE_360: "Booth 360" } as Record<string, string>)[item.category] || "dịch vụ"}` } : item))}/> },
+          { title: "HOẠT ĐỘNG", dataIndex: "isActive", render: (value: boolean, row: Row) => <Checkbox checked={value} onChange={(event) => setBadgeDraft((items) => items.map((item) => item.code === row.code ? { ...item, isActive: event.target.checked } : item))}/> },
+        ]}/>
+      </Panel>
+      <Panel title="Bổ sung kinh nghiệm dịch vụ" description="Ghi nhận lượt làm trước đây chưa có trong hệ thống. Số lượt này được cộng vào tiến độ badge tương ứng.">
+        <Form form={experienceForm} layout="inline" onFinish={(values) => void act(async () => { await request("/badges/experience", { method: "POST", body: values }); experienceForm.resetFields(); await badgeProgress.load(); await experienceHistory.load(); })} style={{ gap: 12, marginBottom: 20 }}>
+          <Form.Item name="employeeId" rules={[{ required: true, message: "Chọn nhân viên" }]}><Select showSearch optionFilterProp="label" placeholder="Nhân viên" style={{ width: 230 }} options={employees.data.map((employee) => ({ value: employee.id, label: employee.displayName }))}/></Form.Item>
+          <Form.Item name="category" rules={[{ required: true, message: "Chọn dịch vụ" }]}><Select placeholder="Loại dịch vụ" style={{ width: 175 }} options={[{ value: "SERVICE_PTB", label: "Photobooth" }, { value: "SERVICE_GLAMBOT", label: "Glambot" }, { value: "SERVICE_360", label: "Booth 360" }]}/></Form.Item>
+          <Form.Item name="amount" rules={[{ required: true, message: "Nhập số lượt" }]}><InputNumber min={1} max={1000} precision={0} placeholder="Số lượt" style={{ width: 110 }}/></Form.Item>
+          <Form.Item name="reason" rules={[{ required: true, min: 3, message: "Nhập lý do" }]}><Input placeholder="Lý do / nguồn xác nhận" style={{ width: 240 }} maxLength={500}/></Form.Item>
+          <Form.Item><Button type="primary" htmlType="submit">Cộng kinh nghiệm</Button></Form.Item>
+        </Form>
+        <Table rowKey="id" size="small" dataSource={experienceHistory.data} pagination={{ pageSize: 5 }} columns={[{ title: "NHÂN VIÊN", render: (_: unknown, row: Row) => row.employee?.displayName }, { title: "DỊCH VỤ", dataIndex: "category", render: (value: string) => ({ SERVICE_PTB: "Photobooth", SERVICE_GLAMBOT: "Glambot", SERVICE_360: "Booth 360" } as Record<string, string>)[value] || value }, { title: "SỐ LƯỢT", dataIndex: "amount", render: (value: number) => `+${value}` }, { title: "LÝ DO", dataIndex: "reason" }, { title: "NGÀY THÊM", dataIndex: "createdAt", render: date }]}/>
+      </Panel>
+      <Panel title="Huy hiệu nhân viên" description="Huy hiệu đã đạt giữ màu; huy hiệu chưa đạt hiển thị màu xám. Di chuột hoặc focus để xem chi tiết." extra={<Button icon={<ReloadOutlined/>} loading={badgeProgress.loading} onClick={() => void badgeProgress.load()}>Làm mới</Button>}>
+        <Table rowKey="id" pagination={{ pageSize: 10 }} dataSource={badgeProgress.data} columns={[
+          { title: "NHÂN VIÊN", dataIndex: "name", render: (name: string, row: Row) => <span><strong>{name}</strong><br/><small>{row.email}</small></span> },
+          { title: "HUY HIỆU", render: (_: unknown, row: Row) => <EmployeeBadgeStrip badges={row.badges}/> },
+        ]}/>
+      </Panel>
       <Modal
         title="Đề xuất điểm"
         open={open}
@@ -1816,6 +1946,7 @@ export function PointsPage() {
         onOk={() => form.submit()}
         okText="Gửi đề xuất"
         cancelText="Hủy"
+        forceRender
       >
         <Form
           form={form}
