@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { App, Button, Calendar, Card, DatePicker, Form, Input, Modal, Space, Spin } from 'antd';
 import { PictureOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
+import { useNavigate } from 'react-router-dom';
 import { request, query } from './api';
 import { extractImageEvents, type ImageSuggestion } from './image-events';
 
@@ -17,12 +18,12 @@ function warning(e: EventRow) {
 }
 
 export function EventCalendar({ revision }: { revision: number }) {
+  const navigate = useNavigate();
   const [month, setMonth] = useState(dayjs());
   const [mode, setMode] = useState<'month' | 'year'>('month');
   const [events, setEvents] = useState<EventRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<EventRow>();
   useEffect(() => {
     let active = true;
     async function load() {
@@ -49,9 +50,8 @@ export function EventCalendar({ revision }: { revision: number }) {
     <Calendar value={month} mode={mode} onPanelChange={(value, nextMode) => { setMonth(value); setMode(nextMode); }} onSelect={value => { if (!value.isSame(month, mode === 'year' ? 'year' : 'month')) setMonth(value); }} cellRender={(day, info) => {
       if (info.type === 'month') { const count = events.filter(event => dayjs(event.startAt).isBefore(day.endOf('month')) && dayjs(event.endAt).isAfter(day.startOf('month'))).length; return <div className="year-event-count">{count ? <><strong>{count}</strong><span>sự kiện</span></> : <span>0 sự kiện</span>}</div>; }
       if (info.type !== 'date') return info.originNode;
-      return <div className="month-events">{events.filter(event => dayjs(event.startAt).isBefore(day.endOf('day')) && dayjs(event.endAt).isAfter(day.startOf('day'))).map(event => <button type="button" title={`${event.name} — ${warning(event).label}`} className={`month-event ${warning(event).color} ${dayjs(event.endAt).isBefore(dayjs(), 'day') ? 'event-past' : ''}`} key={event.id} onClick={ev => { ev.stopPropagation(); setSelected(event); }}>{event.name}</button>)}</div>;
+      return <div className="month-events">{events.filter(event => dayjs(event.startAt).isBefore(day.endOf('day')) && dayjs(event.endAt).isAfter(day.startOf('day'))).map(event => <button type="button" title={`${event.name} — ${warning(event).label}`} className={`month-event ${warning(event).color} ${dayjs(event.endAt).isBefore(dayjs(), 'day') ? 'event-past' : ''}`} key={event.id} onClick={ev => { ev.stopPropagation(); navigate(`/events?eventId=${encodeURIComponent(event.id)}`); }}>{event.name}</button>)}</div>;
     }}/>
-    <Modal title={selected?.name} open={!!selected} onCancel={() => setSelected(undefined)} footer={null}>{selected && <p>{selected.timeConfirmed ? `${dayjs(selected.startAt).format('DD/MM/YYYY HH:mm')} — ${dayjs(selected.endAt).format('DD/MM/YYYY HH:mm')}` : `${dayjs(selected.startAt).format('DD/MM/YYYY')} · Chưa xác định giờ`}</p>}</Modal>
   </section>;
 }
 

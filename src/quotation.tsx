@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Spin, Table, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Radio, Select, Space, Spin, Table, Tag, Typography } from 'antd';
 import { CalendarOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
-import { getSession, request } from './api';
+import { getSession, query, request } from './api';
 import { refreshQuotationNotifications } from './quotation-notifications';
 import { downloadQuotationPdf } from './quotation-pdf';
 
@@ -217,6 +217,10 @@ export function QuotationRequestsPanel() {
   const { message } = App.useApp();
   const reviewRef = useRef<HTMLDivElement>(null);
   const [requests, setRequests] = useState<QuoteRequest[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [statusFilter, setStatusFilter] = useState<string>();
+  const [meta, setMeta] = useState<{ page: number; pageSize: number; total: number; totalPages: number }>();
   const [loading, setLoading] = useState(false);
   const [requestDetail, setRequestDetail] = useState<QuoteRequest | null>(null);
   const [scheduleRequest, setScheduleRequest] = useState<QuoteRequest | null>(null);
@@ -224,7 +228,7 @@ export function QuotationRequestsPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [scheduleForm] = Form.useForm<{ period: [Dayjs, Dayjs] }>();
   const isAdmin = getSession()?.user.role === 'ADMIN';
-  const load = useCallback(async () => { setLoading(true); try { setRequests((await request<QuoteRequest[]>('/quotation/requests?page=1&pageSize=100')).data); refreshQuotationNotifications(); } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không tải được yêu cầu báo giá'); } finally { setLoading(false); } }, [message]);
+  const load = useCallback(async () => { setLoading(true); try { const response = await request<QuoteRequest[]>(`/quotation/requests${query({ page, pageSize, status: statusFilter })}`); setRequests(response.data); setMeta(response.meta); refreshQuotationNotifications(); } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không tải được yêu cầu báo giá'); } finally { setLoading(false); } }, [message, page, pageSize, statusFilter]);
   useEffect(() => { void load(); }, [load]);
   const updateStatus = async (item: QuoteRequest, status: string) => { try { await request(`/quotation/requests/${item.id}/status`, { method: 'PATCH', body: { status } }); message.success('Đã cập nhật trạng thái'); await load(); } catch (reason) { message.error(reason instanceof Error ? reason.message : 'Không thể cập nhật'); } };
   const openSchedule = (item: QuoteRequest) => {
@@ -261,9 +265,13 @@ export function QuotationRequestsPanel() {
   };
   const statusSelect = (row: QuoteRequest, mobile = false) => <Select aria-label={`Trạng thái yêu cầu ${row.code}`} value={row.status} disabled={!!row.eventId} className={mobile ? 'quotation-mobile-status' : undefined} style={mobile ? undefined : { width: 175 }} options={quotationStatusOptions.map(option => ({ ...option, disabled: option.value === 'CONFIRMED' && row.status !== 'CONTACTED' && !row.eventId }))} onChange={value => { if (value === 'CONFIRMED' && !row.eventId) openSchedule(row); else void updateStatus(row, value); }}/>;
   return <>
-    <Card className="quotation-requests-card" title={`Yêu cầu báo giá (${requests.length})`} extra={<Button icon={<ReloadOutlined/>} onClick={() => void load()}>Làm mới</Button>}>
-      <div className="quotation-desktop-table"><Table rowKey="id" loading={loading} dataSource={requests} tableLayout="fixed" scroll={{ x: 1180 }} columns={[{ title: 'Mã', dataIndex: 'code', width: 90 }, { title: 'Khách hàng', width: 160, render: (_, row) => <><strong>{row.customerName}</strong><br/><Typography.Text type="secondary">{row.phone}</Typography.Text></> }, { title: 'Dịch vụ', width: 120, ellipsis: true, render: (_, row) => row.quoteSnapshot?.serviceName || '—' }, { title: 'Địa điểm', dataIndex: 'venue', width: 250, ellipsis: true }, { title: 'Loại giá', width: 135, render: (_, row) => priceTag(row.quoteSnapshot?.priceStatus) }, { title: 'Tổng thanh toán', width: 150, render: (_, row) => row.quoteSnapshot?.total == null ? <Typography.Text type="warning">Liên hệ báo giá</Typography.Text> : vnd(row.quoteSnapshot.total) }, { title: 'Trạng thái', width: 175, render: (_, row) => statusSelect(row) }, { title: '', fixed: 'right', width: 60, render: (_, row) => <Button type="text" aria-label={`Review yêu cầu ${row.code}`} icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}/> }]}/></div>
+    <Card className="quotation-requests-card" title={`Yêu cầu báo giá (${meta?.total ?? '—'})`} extra={<Button icon={<ReloadOutlined/>} onClick={() => void load()}>Làm mới</Button>}>
+      <div className="equipment-filters" style={{ marginBottom: 16 }}>
+        <Select allowClear placeholder="Lọc theo trạng thái" value={statusFilter} onChange={(value) => { setStatusFilter(value); setPage(1); }} style={{ width: 220 }} options={quotationStatusOptions}/>
+      </div>
+      <div className="quotation-desktop-table"><Table rowKey="id" loading={loading} dataSource={requests} pagination={false} tableLayout="fixed" scroll={{ x: 1180 }} columns={[{ title: 'Mã', dataIndex: 'code', width: 90 }, { title: 'Khách hàng', width: 160, render: (_, row) => <><strong>{row.customerName}</strong><br/><Typography.Text type="secondary">{row.phone}</Typography.Text></> }, { title: 'Dịch vụ', width: 120, ellipsis: true, render: (_, row) => row.quoteSnapshot?.serviceName || '—' }, { title: 'Địa điểm', dataIndex: 'venue', width: 250, ellipsis: true }, { title: 'Loại giá', width: 135, render: (_, row) => priceTag(row.quoteSnapshot?.priceStatus) }, { title: 'Tổng thanh toán', width: 150, render: (_, row) => row.quoteSnapshot?.total == null ? <Typography.Text type="warning">Liên hệ báo giá</Typography.Text> : vnd(row.quoteSnapshot.total) }, { title: 'Trạng thái', width: 175, render: (_, row) => statusSelect(row) }, { title: '', fixed: 'right', width: 60, render: (_, row) => <Button type="text" aria-label={`Review yêu cầu ${row.code}`} icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}/> }]}/></div>
       <div className="quotation-mobile-list" aria-label="Danh sách yêu cầu báo giá">{loading ? <div className="quotation-mobile-loading"><Spin/><span>Đang tải yêu cầu…</span></div> : requests.length ? requests.map(row => <article className="quotation-mobile-card" key={row.id}><div className="quotation-mobile-card-main"><div className="quotation-mobile-card-head"><strong>{row.code}</strong>{priceTag(row.quoteSnapshot?.priceStatus)}</div><h3>{row.customerName}</h3><a href={`tel:${row.phone}`}>{row.phone}</a><dl><div><dt>Dịch vụ</dt><dd>{row.quoteSnapshot?.serviceName || '—'}</dd></div><div><dt>Địa điểm</dt><dd>{row.venue}</dd></div><div><dt>Tổng dự kiến</dt><dd>{row.quoteSnapshot?.total == null ? 'Liên hệ báo giá' : vnd(row.quoteSnapshot.total)}</dd></div></dl></div><div className="quotation-mobile-card-actions">{statusSelect(row, true)}<Button icon={<EyeOutlined/>} onClick={() => setRequestDetail(row)}>Review</Button></div></article>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có yêu cầu báo giá"/>}</div>
+      {!!meta && meta.total > 0 && <Pagination current={meta.page} pageSize={meta.pageSize} total={meta.total} showSizeChanger pageSizeOptions={[10, 20, 30]} hideOnSinglePage onChange={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }}/>}
     </Card>
     <Modal className="quotation-review-modal" width={900} title={null} open={!!requestDetail} onCancel={() => setRequestDetail(null)} footer={requestDetail ? <div className="quotation-review-actions"><Button icon={<DownloadOutlined/>} loading={exportingPdf} onClick={() => void exportPdf()}>Tải PDF</Button><Button onClick={() => setRequestDetail(null)}>Đóng</Button>{isAdmin && !requestDetail.eventId && requestDetail.status === 'CONTACTED' && <Button type="primary" icon={<CalendarOutlined/>} onClick={() => openSchedule(requestDetail)}>Xác nhận & khóa lịch</Button>}{requestDetail.eventId && <Button disabled icon={<CheckCircleOutlined/>}>Đã khóa lịch</Button>}</div> : null}>
       {requestDetail && <div ref={reviewRef} className="quotation-review">

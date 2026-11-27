@@ -6,7 +6,7 @@ import viVN from 'antd/locale/vi_VN';
 import 'antd/dist/reset.css';
 import './styles.css';
 import { Shell, LoginPage, PermissionRoute, Protected } from './shell';
-import { AttendancePage, AuditPage, CalendarPage, CatalogPage, ComingSoonPage, Dashboard, EmployeesPage, EquipmentDetailPage, EquipmentListPage, EventsPage, LarkPage, MaterialListPage, OfficePage, PointsPage, ServicesPage, UsersPage } from './pages';
+import { AttendancePage, AuditPage, CalendarPage, CatalogPage, ComingSoonPage, Dashboard, EmployeesPage, EquipmentDetailPage, EquipmentListPage, EventsPage, LarkPage, MaterialListPage, MonthlyAttendancePage, OfficePage, PointsPage, ServicesPage, UsersPage } from './pages';
 import { adminTheme } from './theme';
 
 const allowed = (permission: string, page: React.ReactNode) => <PermissionRoute permission={permission}>{page}</PermissionRoute>;
@@ -31,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="quotation" element={<Navigate to="/services?tab=requests" replace/>}/>
           <Route path="calendar" element={allowed('CALENDAR_VIEW', <CalendarPage/>)}/>
           <Route path="attendance" element={allowed('ATTENDANCE_VIEW', <AttendancePage/>)}/>
+          <Route path="attendance/monthly" element={allowed('ATTENDANCE_VIEW', <MonthlyAttendancePage/>)}/>
           <Route path="points" element={allowed('POINTS_VIEW', <PointsPage/>)}/>
           <Route path="guidelines" element={allowed('GUIDELINES_VIEW', <ComingSoonPage type="guidelines"/>)}/>
           <Route path="audit" element={allowed('AUDIT_VIEW', <AuditPage/>)}/>
